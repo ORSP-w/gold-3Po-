@@ -9,11 +9,15 @@ input int RequestTimeoutMs = 1500;
 
 ulong sequenceNumber = 0;
 ulong lastSentAt = 0;
+string sequenceKey = "";
 int lastHttpStatus = 0;
 
 int OnInit()
 {
-   sequenceNumber = (ulong)TimeGMT() * 1000;
+   sequenceKey = "G3P_SEQ_" + _Symbol;
+   ulong epochSeed = (ulong)TimeGMT() * 1000;
+   if(GlobalVariableCheck(sequenceKey)) sequenceNumber = (ulong)MathMax((double)epochSeed, GlobalVariableGet(sequenceKey));
+   else sequenceNumber = epochSeed;
    if(StringLen(IngestToken) < 24)
    {
       Print("GOLD-3Po: set an ingest token of at least 24 characters.");
@@ -31,6 +35,7 @@ void OnTick()
    if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
    lastSentAt = nowMs;
    sequenceNumber++;
+   GlobalVariableSet(sequenceKey, (double)sequenceNumber);
    double lastPrice = tick.last > 0 ? tick.last : (tick.bid + tick.ask) / 2.0;
    string stamp = TimeToString(TimeGMT(), TIME_DATE | TIME_SECONDS);
    StringReplace(stamp, ".", "-");
