@@ -1,7 +1,12 @@
 {
   "name": "gold-3po-market-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node --test", "serve": "python3 -m http.server 4173" }
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node --check app.js && node --check server.js && node --check market-data.js",
+    "serve": "python3 -m http.server 4173"
+  }
 }
