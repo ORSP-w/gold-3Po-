@@ -12,7 +12,7 @@ export function normalizeTick(input) {
 
 export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 2000 } = {}) {
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
-  const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-200000);
+  const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-1000000);
   const bars = new Map();
   for (const t of ticks) {
     const start = floorTime(t.time, intervalMs);
