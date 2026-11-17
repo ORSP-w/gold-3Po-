@@ -51,7 +51,7 @@ try {
   await page.locator('.candle[data-index="2"]').click();
   assert.match(await page.locator('#selectedBar').innerText(), /#03/);
   await page.locator('#resetView').click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#08/);
+  assert.match(await page.locator('#selectedBar').innerText(), /#12/);
   assert.equal(await page.locator('.zone-row.selected').count(), 0, 'reset should clear zone selection');
 
   await page.locator('#layoutButton').click();
