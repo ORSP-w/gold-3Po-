@@ -38,3 +38,15 @@ test('timeframe aggregation separates bars and orders ticks chronologically',()=
   assert.equal(out.bars[1].c,2651);
 });
 test('analysis validates its inputs',()=>assert.throws(()=>buildMarketAnalysis([], {priceStep:0}),/Invalid analysis input/));
+
+test('analysis calculates cumulative delta and leaves absorption unavailable without aggressor data',()=>{
+ const out=buildMarketAnalysis([
+  tick('2026-11-17T10:01:00.000Z',2650,'buy'),
+  tick('2026-11-17T10:02:00.000Z',2650,'sell'),
+  tick('2026-11-17T10:03:00.000Z',2650,'buy')
+ ]);
+ assert.equal(out.bars[0].cumulativeDelta,5);
+ assert.equal(out.bars[0].absorption,false);
+ assert.ok(Array.isArray(out.bars[0].stackedImbalances));
+ assert.ok(Array.isArray(out.bars[0].sweeps));
+});
