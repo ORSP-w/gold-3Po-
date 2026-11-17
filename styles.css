@@ -5,3 +5,5 @@
 .timeframe-label{font:8px var(--mono);letter-spacing:.06em;color:#c7b27d;border:1px solid var(--line);border-radius:6px;padding:7px 9px;white-space:nowrap}
 
 .selected-zone{stroke:#f3d18c;stroke-width:2}.zone-row.selected{background:#d8b66b12;box-shadow:inset 2px 0 #d8b66b}.zone-row.selected .zone-info strong{color:#f0d89f}
+
+.error{color:#f17c88}
