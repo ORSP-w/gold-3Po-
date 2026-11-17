@@ -2,10 +2,11 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { buildMarketAnalysis } from './market-engine.js';
 
-const MAX_BODY_BYTES = 32 * 1024;
-const MAX_EVENTS = 5000;
-const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'] };
+const MAX_BODY_BYTES = 1024 * 1024;
+const MAX_EVENTS = 200000;
+const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -25,7 +26,7 @@ function tokenMatches(header, token) {
 }
 function normalizeMt5(input) {
   if (input?.source !== 'mt5' || typeof input.symbol !== 'string' || !input.symbol.trim() || !validTimestamp(input.timestamp) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || !positive(input.bid) || !positive(input.ask) || input.ask < input.bid || !positive(input.last) || !Number.isFinite(input.tickVolume) || input.tickVolume < 0 || !Number.isFinite(input.realVolume) || input.realVolume < 0) throw Object.assign(new Error('Invalid MT5 tick. Required: source, symbol, ISO timestamp, positive sequence, bid, ask, last, tickVolume and realVolume.'), { status: 422 });
-  return { type: 'quote', source: 'mt5', venue: 'broker_otc', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, bid: input.bid, ask: input.ask, last: input.last, tickVolume: input.tickVolume, realVolume: input.realVolume, volumeKind: 'broker_tick_or_reported_volume' };
+  return { type: 'quote', source: 'mt5', venue: 'broker_otc', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, bid: input.bid, ask: input.ask, last: input.last, tickVolume: input.tickVolume, realVolume: input.realVolume, aggressorSide: ['buy','sell'].includes(input.aggressorSide) ? input.aggressorSide : 'unknown', flags: Number.isInteger(input.flags) ? input.flags : 0, volumeKind: 'broker_tick_or_reported_volume' };
 }
 function normalizeComex(input) {
   if (input?.source !== 'comex' || typeof input.symbol !== 'string' || !input.symbol.trim() || !validTimestamp(input.timestamp) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || typeof input.tradeId !== 'string' || !input.tradeId.trim() || !positive(input.price) || !positive(input.size) || !['buy','sell','unknown'].includes(input.aggressorSide)) throw Object.assign(new Error('Invalid COMEX trade. Required: source, symbol, ISO timestamp, positive sequence, tradeId, price, size and aggressorSide.'), { status: 422 });
@@ -48,10 +49,40 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const selected = events.filter(e => !symbol || e.symbol === symbol).slice(-limit);
       return json(res, 200, { count: selected.length, events: selected });
     }
+    if (req.method === 'GET' && url.pathname === '/v1/market/analysis') {
+      const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
+      const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
+      const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
+      const selected = events.filter(e => e.symbol === symbol && e.source === 'mt5');
+      return json(res, 200, { symbol, ...buildMarketAnalysis(selected, { intervalMs, priceStep }), feed: health().feeds.find(f => f.source === 'mt5' && f.symbol === symbol) || null });
+    }
     if (req.method === 'GET' && url.pathname === '/v1/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('event: ready\ndata: {"status":"connected"}\n\n'); clients.add(res);
       res.on('close', () => clients.delete(res)); return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/ingest/mt5/history') {
+      if (!token) return json(res, 503, { error: 'ingest_not_configured' });
+      if (!tokenMatches(req.headers.authorization, token)) return json(res, 401, { error: 'unauthorized' });
+      try {
+        const body = await readJson(req);
+        if (body?.source !== 'mt5' || !Array.isArray(body.ticks) || body.ticks.length < 1 || body.ticks.length > 1000) return json(res, 422, { error: 'invalid_history_batch', message: 'Expected 1..1000 MT5 ticks.' });
+        let accepted = 0; let rejected = 0;
+        for (const raw of body.ticks) {
+          try {
+            const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol || raw.symbol });
+            const key = event.source + ':' + event.symbol; const previous = lastSequence.get(key) || 0;
+            if (event.sequence <= previous) { rejected++; continue; }
+            lastSequence.set(key,event.sequence);
+            const receivedAt=now(); const stored={...event,receivedAt:new Date(receivedAt).toISOString(),historical:true};
+            events.push(stored); if(events.length>MAX_EVENTS) events.shift();
+            const existing=feeds.get(key); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(existing?.accepted||0)+1});
+            const packet=`event: market\ndata: ${JSON.stringify(stored)}\n\n`; for(const client of clients) client.write(packet);
+            accepted++;
+          } catch { rejected++; }
+        }
+        return json(res,202,{accepted,rejected,total:body.ticks.length});
+      } catch(error) { return json(res,error.status||400,{error:'invalid_request',message:error.message}); }
     }
     const routes = { '/v1/ingest/mt5/tick': normalizeMt5, '/v1/ingest/comex/trade': normalizeComex };
     const normalize = routes[url.pathname];
