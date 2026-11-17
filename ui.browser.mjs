@@ -19,7 +19,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, deviceScaleFactor: 1 });
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
-  await page.goto(base, { waitUntil: 'networkidle' });
+  await page.goto(base, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.foot-cell');
   assert.equal(await page.locator('.candle').count(), 12, '12 price bars should render');
   assert.equal(await page.locator('.foot-cell').count(), 180, '15 price levels × 12 bars should render');
