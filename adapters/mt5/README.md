@@ -30,5 +30,5 @@ The 30-day request means "up to the history available from the broker/terminal".
 
 - The EA must be compiled in MetaEditor; compilation cannot be performed by GitHub CI.
 - MT5 WebRequest requires the API origin to be explicitly allowlisted.
-- For remote MT5/API hosts, use HTTPS, firewall restrictions, and a private network or VPN. Do not expose the token or an unencrypted ingestion endpoint publicly.
+- The default `127.0.0.1` configuration is for MT5 and API running on the same machine. For one shared feed for all users, deploy one API instance on a server, put it behind HTTPS, and set both EA URLs to that server's HTTPS endpoints. Restrict ingestion with firewall/network rules and the bearer token; never expose an unencrypted ingestion endpoint publicly.
 - This bridge sends market data only; it does not place, modify, or close trades.
