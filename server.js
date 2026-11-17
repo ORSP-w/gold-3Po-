@@ -33,10 +33,10 @@ function normalizeComex(input) {
   return { type: 'trade', source: 'comex', venue: 'comex_futures', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, tradeId: input.tradeId.trim(), price: input.price, size: input.size, aggressorSide: input.aggressorSide, volumeKind: 'exchange_trade_size' };
 }
 
-export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000 } = {}) {
+export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl' } = {}) {
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set();
-  const dataFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl';
-  const storageReady = (async () => { try { const raw = await readFile(dataFile, 'utf8'); for (const line of raw.split('\n')) { if (!line.trim()) continue; try { const event = JSON.parse(line); events.push(event); const key=event.source+':'+event.symbol; lastSequence.set(key,Math.max(lastSequence.get(key)||0,event.sequence||0)); const receivedAt=Date.parse(event.receivedAt)||Date.now(); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(feeds.get(key)?.accepted||0)+1}); } catch {} } } catch (error) { if (error.code !== 'ENOENT') throw error; } })();
+  const dataFile = storageFile;
+  const storageReady = dataFile ? (async () => { try { const raw = await readFile(dataFile, 'utf8'); for (const line of raw.split('\n')) { if (!line.trim()) continue; try { const event = JSON.parse(line); events.push(event); const key=event.source+':'+event.symbol; lastSequence.set(key,Math.max(lastSequence.get(key)||0,event.sequence||0)); const receivedAt=Date.parse(event.receivedAt)||Date.now(); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(feeds.get(key)?.accepted||0)+1}); } catch {} } } catch (error) { if (error.code !== 'ENOENT') throw error; } })();
   async function persist(stored) { await mkdir('./data/', { recursive:true }); await appendFile(dataFile, JSON.stringify(stored)+'\n'); }
   function health() {
     const at = now();
