@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import{DEMO_BARS,DEMO_ZONES,PRICE_LEVELS,barDelta,totalVolume,imbalanceRatio,validateMarketFixtures}from'./market-data.js';
+test('demo fixtures satisfy OHLC, volume, zone and price-level invariants',()=>assert.deepEqual(validateMarketFixtures(DEMO_BARS,DEMO_ZONES,PRICE_LEVELS),[]));
+test('delta, total volume and imbalance are deterministic',()=>{const b=DEMO_BARS[7];assert.equal(barDelta(b),184);assert.equal(totalVolume(b),1036);assert.equal(Number(imbalanceRatio(b).toFixed(2)),1.43);});
+test('validator rejects malformed candles and zones',()=>{const errors=validateMarketFixtures([{time:'x',o:10,h:8,l:9,c:11,bid:-1,ask:3}],[{id:'bad',side:'neutral',low:5,high:4,strength:1.4}],[1,2]);for(const s of['invalid bid','invalid OHLC','invalid side','invalid price range','strength'])assert.ok(errors.some(e=>e.includes(s)));});
+test('all footprint source volumes are positive integers',()=>{for(const b of DEMO_BARS){assert.ok(Number.isInteger(b.bid)&&b.bid>0);assert.ok(Number.isInteger(b.ask)&&b.ask>0);}});
