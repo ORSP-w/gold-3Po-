@@ -64,7 +64,7 @@ void SyncHistory()
    int days = MathMax(1, MathMin(HistoryDays, 90));
    int batchSize = MathMax(10, MathMin(HistoryBatchSize, 250));
    ulong historySequence = 0;
-   datetime endTime = TimeCurrent();
+   datetime endTime = TimeGMT();
    datetime startTime = endTime - days * 86400;
    Print("GOLD-3Po: requesting up to ", days, " days of broker ticks for ", _Symbol);
    for(datetime cursor=startTime; cursor<endTime; cursor+=3600)
