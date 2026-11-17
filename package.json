@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node --env-file=.env server.js",
     "test": "node --test",
-    "check": "node --check app.js && node --check server.js && node --check market-data.js",
+    "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-engine.js",
     "serve": "python3 -m http.server 4173"
   }
 }
