@@ -24,3 +24,17 @@ test('feed health changes to stale after the configured threshold',async()=>{let
 test('oversized request bodies return 413 and server remains usable',async()=>{const huge='x'.repeat(33*1024);const r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:huge});assert.equal(r.status,413);const h=await fetch(base+'/health');assert.equal(h.status,200);});
 
 test('same-origin server serves market lab UI and assets',async()=>{const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);const markup=await page.text();assert.match(markup,/market-client\.js/);for(const asset of ['/app.js','/market-data.js','/market-client.js','/styles.css']){const r=await fetch(base+asset);assert.equal(r.status,200,asset);}});
+
+test('MT5 history batches are authenticated and aggregated into candles and footprint levels',async()=>{
+ const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
+ const r=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+ const body=await r.json();assert.equal(r.status,202);assert.equal(body.accepted,2);
+ const a=await fetch(base+'/v1/market/analysis?symbol=XAUUSD&intervalMs=900000');const data=await a.json();
+ assert.equal(a.status,200);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,2);assert.equal(data.bars[0].unknown,2);assert.equal(data.bars[0].ask,0);assert.equal(data.bars[0].levels.length,1);
+});
+test('MT5 history endpoint rejects oversized batches and missing authentication',async()=>{
+ const body=JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:[mt5()]});
+ const noAuth=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{'content-type':'application/json'},body});assert.equal(noAuth.status,401);
+ const tooMany=Array.from({length:1001},(_,i)=>({...mt5(i+1)}));
+ const large=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:tooMany})});assert.equal(large.status,422);
+});
