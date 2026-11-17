@@ -12,6 +12,9 @@ input int HistoryBatchSize = 100;
 
 ulong sequenceNumber = 0;
 ulong lastSentAt = 0;
+long lastTickMsc = 0;
+double lastBid = 0, lastAsk = 0, lastLast = 0;
+ulong lastVolume = 0;
 string sequenceKey = "";
 int lastHttpStatus = 0;
 
@@ -119,6 +122,8 @@ void OnTimer()
    if(lastSentAt != 0 && nowMs - lastSentAt < (ulong)MathMax(10, MinIntervalMs)) return;
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
+   if(tick.time_msc == lastTickMsc && tick.bid == lastBid && tick.ask == lastAsk && tick.last == lastLast && tick.volume == lastVolume) return;
+   lastTickMsc = tick.time_msc; lastBid = tick.bid; lastAsk = tick.ask; lastLast = tick.last; lastVolume = tick.volume;
    lastSentAt = nowMs;
    sequenceNumber++;
    GlobalVariableSet(sequenceKey, (double)sequenceNumber);
