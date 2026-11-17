@@ -13,3 +13,12 @@ jobs:
           node-version: 22
       - run: npm test
       - run: npm run check
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: node ui.browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: market-lab-browser-screenshots
+          path: artifacts/
+          if-no-files-found: ignore
