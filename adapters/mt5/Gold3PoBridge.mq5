@@ -13,6 +13,7 @@ int lastHttpStatus = 0;
 
 int OnInit()
 {
+   sequenceNumber = (ulong)TimeGMT() * 1000;
    if(StringLen(IngestToken) < 24)
    {
       Print("GOLD-3Po: set an ingest token of at least 24 characters.");
