@@ -5,8 +5,8 @@ export function normalizeTick(input) {
   const time = Date.parse(input.timestamp);
   if (!Number.isFinite(time) || !finite(input.bid) || !finite(input.ask) || input.bid <= 0 || input.ask < input.bid) throw new TypeError('Invalid tick timestamp or quote');
   const last = finite(input.last) && input.last > 0 ? input.last : (input.bid + input.ask) / 2;
-  const volume = direction !== 'unknown' ? (finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1) : 1;
   const direction = ['buy','sell','unknown'].includes(input.aggressorSide) ? input.aggressorSide : 'unknown';
+  const volume = direction !== 'unknown' ? (finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1) : 1;
   return { timestamp: new Date(time).toISOString(), time, bid: input.bid, ask: input.ask, last, volume, direction, source: input.source || 'mt5', symbol: String(input.symbol || 'XAUUSD').toUpperCase() };
 }
 
