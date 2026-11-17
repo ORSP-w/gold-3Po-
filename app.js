@@ -8,7 +8,7 @@ const fmt=(v,d=2)=>Number(v).toLocaleString('en-US',{minimumFractionDigits:d,max
 function notify(s){toast.textContent=s;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2100);}
 function currentLevels(){if(!live)return levels;const start=Math.max(0,Math.min(Math.max(0,bars.length-24),selected-12)),subset=bars.slice(start,start+24),set=new Set();for(const b of subset)for(const l of b.levels||[])set.add(Number(l.price));return [...set].sort((a,b)=>b-a).slice(0,32);}
 function renderChart(){
- const left=64, step=bars.length<=36?850/Math.max(1,bars.length):7, width=Math.max(850,bars.length*step), svgWidth=left+width+85;
+ const left=64, step=bars.length<=120?850/Math.max(1,bars.length):7, width=Math.max(850,bars.length*step), svgWidth=left+width+85;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length)return;
  const min=Math.min(...allPrices)-1,max=Math.max(...allPrices)+1,x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(2,Math.min(10,step*.62));
  let html=''; for(let p=Math.ceil(min/5)*5;p<=max;p+=5)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,0)}</text>`;
