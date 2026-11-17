@@ -5,7 +5,7 @@ export function normalizeTick(input) {
   const time = Date.parse(input.timestamp);
   if (!Number.isFinite(time) || !finite(input.bid) || !finite(input.ask) || input.bid <= 0 || input.ask < input.bid) throw new TypeError('Invalid tick timestamp or quote');
   const last = finite(input.last) && input.last > 0 ? input.last : (input.bid + input.ask) / 2;
-  const volume = finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1;
+  const volume = direction !== 'unknown' ? (finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1) : 1;
   const direction = ['buy','sell','unknown'].includes(input.aggressorSide) ? input.aggressorSide : 'unknown';
   return { timestamp: new Date(time).toISOString(), time, bid: input.bid, ask: input.ask, last, volume, direction, source: input.source || 'mt5', symbol: String(input.symbol || 'XAUUSD').toUpperCase() };
 }
@@ -14,7 +14,6 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
   const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-200000);
   const bars = new Map();
-  let previousLast = null;
   for (const t of ticks) {
     const start = floorTime(t.time, intervalMs);
     let bar = bars.get(start);
@@ -27,7 +26,6 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     if (t.direction === 'buy') { level.ask += t.volume; bar.ask += t.volume; }
     else if (t.direction === 'sell') { level.bid += t.volume; bar.bid += t.volume; }
     else { level.unknown += t.volume; bar.unknown += t.volume; }
-    previousLast=t.last;
   }
   const result = [...bars.values()].slice(-Math.max(1,limit)).map(bar => {
     const levels=[...bar.levels.values()].sort((a,b)=>b.price-a.price);
