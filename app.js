@@ -6,7 +6,7 @@ let levels=FIXTURE_LEVELS.slice(), analysisMeta=null, hasAutoScrolled=false;
 const errors=validateMarketFixtures(FIXTURE_BARS,FIXTURE_ZONES,FIXTURE_LEVELS); if(errors.length) throw Error(errors.join('; '));
 const fmt=(v,d=2)=>Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
 function notify(s){toast.textContent=s;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2100);}
-function currentLevels(){if(!live)return levels;const subset=bars.slice(-24),set=new Set();for(const b of subset)for(const l of b.levels||[])set.add(Number(l.price));return [...set].sort((a,b)=>b-a).slice(0,32);}
+function currentLevels(){if(!live)return levels;const start=Math.max(0,Math.min(Math.max(0,bars.length-24),selected-12)),subset=bars.slice(start,start+24),set=new Set();for(const b of subset)for(const l of b.levels||[])set.add(Number(l.price));return [...set].sort((a,b)=>b-a).slice(0,32);}
 function renderChart(){
  const left=64, step=bars.length<=36?850/Math.max(1,bars.length):7, width=Math.max(850,bars.length*step), svgWidth=left+width+85;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length)return;
