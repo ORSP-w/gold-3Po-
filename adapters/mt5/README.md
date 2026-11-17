@@ -17,7 +17,7 @@ The bridge connects through the user's logged-in MetaTrader 5 terminal. It does 
 - The EA then sends live broker quotes on a timer. MT5 terminal must remain open and connected.
 - Server events are appended to `./data/market-events.jsonl` by default and reloaded after an API restart. Set `MARKET_DATA_FILE` to change the file path.
 - The analysis API aggregates the same tick stream into OHLC candles and price-level footprint buckets. The default candle interval is 15 minutes and price step is 0.1.
-- The API retains the latest 200,000 events in memory for analysis; the append-only JSONL file is the durable raw archive.
+- The API retains the latest 1,000,000 events in memory for analysis; the append-only JSONL file is the durable raw archive.
 
 ## Volume and footprint semantics
 
