@@ -21,7 +21,7 @@ async function refreshHealth(){
  try{
   const response=await fetch('/health',{cache:'no-store'});if(!response.ok)throw new Error('HTTP '+response.status);
   const health=await response.json();paint(api,health.ingestConfigured?'API ONLINE':'TOKEN MISSING',health.ingestConfigured?'online':'warning');
-  for(const name of ['mt5','comex']){const feed=health.feeds.find(item=>item.source===name&&(!item.symbol||item.symbol==='XAUUSD'));if(!feed)paint(labels[name],'WAITING','warning');else paint(labels[name],feed.status.toUpperCase()+' · '+ageLabel(feed.ageMs),feed.status);}
+  for(const name of ['mt5','comex']){const feed=health.feeds.find(item=>item.source===name&&(name==='comex'||!item.symbol||item.symbol==='XAUUSD'));if(!feed)paint(labels[name],'WAITING','warning');else paint(labels[name],feed.status.toUpperCase()+' · '+ageLabel(feed.ageMs),feed.status);}
   if(Date.now()-lastAnalysisAt>10000)scheduleAnalysis();
  }catch{paint(api,'API OFFLINE','error');paint(mt5,'UNAVAILABLE','error');paint(comex,'UNAVAILABLE','error');}
 }
