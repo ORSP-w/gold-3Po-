@@ -23,7 +23,7 @@ test('feed health changes to stale after the configured threshold',async()=>{let
 
 test('oversized request bodies return 413 and server remains usable',async()=>{const huge='x'.repeat(33*1024);const r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:huge});assert.equal(r.status,413);const h=await fetch(base+'/health');assert.equal(h.status,200);});
 
-test('same-origin server serves market lab UI and assets',async()=>{const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);const markup=await page.text();assert.match(markup,/market-client\.js/);for(const asset of ['/app.js','/market-data.js','/market-client.js','/styles.css']){const r=await fetch(base+asset);assert.equal(r.status,200,asset);}});
+test('same-origin server serves market lab UI and assets',async()=>{const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);const markup=await page.text();assert.match(markup,/market-client\.js/);for(const asset of ['/app.js','/market-data.js','/market-client.js','/market-engine.js','/styles.css']){const r=await fetch(base+asset);assert.equal(r.status,200,asset);}});
 
 test('MT5 history batches are authenticated and aggregated into candles and footprint levels',async()=>{
  const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
