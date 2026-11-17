@@ -59,6 +59,9 @@ try {
   await page.locator('#layoutButton').click();
   assert.ok(!(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart'))));
 
+  const historyTicks = Array.from({length:30},(_,i)=>{const at=new Date(Date.now()-(29-i)*86400000);at.setUTCHours(10,0,0,0);return {timestamp:at.toISOString(),sequence:i+1,bid:2640+i*.1,ask:2640.2+i*.1,last:2640.1+i*.1,tickVolume:1,realVolume:0,flags:0};});
+  const historyResponse=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:historyTicks})});
+  assert.equal(historyResponse.status,202,'30-day broker history fixture should be accepted');
   const now = new Date().toISOString();
   const mt5 = { source:'mt5', symbol:'XAUUSD', timestamp:now, sequence:Date.now(), bid:2648.2, ask:2648.4, last:2648.3, tickVolume:1, realVolume:0 };
   const comex = { source:'comex', symbol:'GCZ6', timestamp:now, sequence:Date.now(), tradeId:'browser-check-'+Date.now(), price:2650.1, size:2, aggressorSide:'buy' };
@@ -68,6 +71,8 @@ try {
   }
   await page.waitForFunction(() => document.querySelector('#mt5Status')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
   await page.waitForFunction(() => document.querySelector('#comexStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
+  assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day history, not remain at 12 fixture candles');
 
   await mkdir('artifacts', { recursive:true });
   await page.screenshot({ path:'artifacts/market-lab-desktop.png', fullPage:true });
