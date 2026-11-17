@@ -37,7 +37,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set();
   const dataFile = storageFile;
   const storageReady = dataFile ? (async () => { try { const raw = await readFile(dataFile, 'utf8'); for (const line of raw.split('\n')) { if (!line.trim()) continue; try { const event = JSON.parse(line); events.push(event); const key=event.source+':'+event.symbol; lastSequence.set(key,Math.max(lastSequence.get(key)||0,event.sequence||0)); const receivedAt=Date.parse(event.receivedAt)||Date.now(); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(feeds.get(key)?.accepted||0)+1}); } catch {} } } catch (error) { if (error.code !== 'ENOENT') throw error; } })();
-  async function persist(stored) { await mkdir('./data/', { recursive:true }); await appendFile(dataFile, JSON.stringify(stored)+'\n'); }
+  async function persist(stored) { if (!dataFile) return; await mkdir('./data/', { recursive:true }); await appendFile(dataFile, JSON.stringify(stored)+'\n'); }
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), eventCount: events.length, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
