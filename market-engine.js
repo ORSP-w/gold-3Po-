@@ -10,7 +10,7 @@ export function normalizeTick(input) {
   return { timestamp: new Date(time).toISOString(), time, bid: input.bid, ask: input.ask, last, volume, direction, source: input.source || 'mt5', symbol: String(input.symbol || 'XAUUSD').toUpperCase() };
 }
 
-export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 2000 } = {}) {
+export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000 } = {}) {
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
   const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-1000000);
   const bars = new Map();
@@ -27,7 +27,8 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     else if (t.direction === 'sell') { level.bid += t.volume; bar.bid += t.volume; }
     else { level.unknown += t.volume; bar.unknown += t.volume; }
   }
-  const result = [...bars.values()].slice(-Math.max(1,limit)).map(bar => {
+  let cumulativeDelta = 0;
+  const result = [...bars.values()].slice(-Math.max(1,limit)).map((bar, barIndex, allBars) => {
     const levels=[...bar.levels.values()].sort((a,b)=>b.price-a.price);
     const total=bar.bid+bar.ask+bar.unknown;
     const delta=bar.ask-bar.bid;
@@ -38,7 +39,27 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
       if(a.ask>=3 && askRatio>=3) imbalances.push({side:'buy',price:a.price,ratio:Number(askRatio.toFixed(2))});
       if(b.bid>=3 && bidRatio>=3) imbalances.push({side:'sell',price:b.price,ratio:Number(bidRatio.toFixed(2))});
     }
-    return { time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,levels,imbalances };
+    cumulativeDelta += delta;
+    const stacked = [];
+    for (const side of ['buy','sell']) {
+      let run=[];
+      for (let j=0;j<levels.length;j++) {
+        const level=levels[j], adjacent=side==='buy'?levels[j+1]:levels[j-1];
+        const ratio=side==='buy'?level.ask/Math.max(1,adjacent?.bid||0):level.bid/Math.max(1,adjacent?.ask||0);
+        const active=side==='buy'?level.ask>=3&&ratio>=3:level.bid>=3&&ratio>=3;
+        if(active) run.push(level.price); else { if(run.length>=3) stacked.push({side,prices:run}); run=[]; }
+      }
+      if(run.length>=3) stacked.push({side,prices:run});
+    }
+    const prior=allBars.slice(Math.max(0,barIndex-20),barIndex);
+    const priorHigh=prior.length?Math.max(...prior.map(x=>x.h)):null,priorLow=prior.length?Math.min(...prior.map(x=>x.l)):null;
+    const sweeps=[];
+    if(priorHigh!==null&&bar.h>priorHigh&&bar.c<priorHigh)sweeps.push({side:'buy-side',level:priorHigh,reclaimed:true});
+    if(priorLow!==null&&bar.l<priorLow&&bar.c>priorLow)sweeps.push({side:'sell-side',level:priorLow,reclaimed:true});
+    const range=Math.max(0,bar.h-bar.l),body=Math.abs(bar.c-bar.o),directionalKnown=bar.unknown===0&&total>0;
+    const absorption=directionalKnown&&total>=3&&range>0&&body/range<=0.25&&Math.abs(delta)/total<=0.2;
+    const exhaustion=directionalKnown&&total>=3&&Math.abs(delta)/total>=0.7&&range<=priceStep*5;
+    return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
   });
   const zones = detectLiquidityZones(result, priceStep);
   return { bars:result, zones, tickCount:ticks.length, volumeKind:'broker_tick_volume_or_reported_volume', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
