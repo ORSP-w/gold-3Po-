@@ -16,7 +16,8 @@ The bridge connects through the user's logged-in MetaTrader 5 terminal. It does 
 - On initialization, the EA requests the available broker tick history for up to 30 days using hourly `CopyTicksRange` windows and uploads batches of up to 100 ticks.
 - The EA then sends live broker quotes on a timer. MT5 terminal must remain open and connected.
 - Server events are appended to `./data/market-events.jsonl` by default and reloaded after an API restart. Set `MARKET_DATA_FILE` to change the file path.
-- The analysis API aggregates the same tick stream into OHLC candles and price-level footprint buckets. The default candle interval is 15 minutes and price step is 0.1.
+- The analysis API aggregates the same tick stream into 15-minute OHLC candles and price-level footprint buckets (default price step 0.1). The chart can scroll through the loaded history; the Footprint panel shows the latest 24 bars.
+- The engine calculates cumulative delta, adjacent and stacked imbalance candidates, repeated swing-high/low liquidity pools, and price sweeps/reclaims. Absorption and exhaustion are emitted only when aggressor-side volume is known; they are not inferred from unclassified OTC quotes.
 - The API retains the latest 1,000,000 events in memory for analysis; the append-only JSONL file is the durable raw archive.
 
 ## Volume and footprint semantics
