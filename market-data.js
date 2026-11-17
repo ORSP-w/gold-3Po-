@@ -1,7 +1,7 @@
 export const DEMO_BARS = [
 {time:'14:00',o:2638.2,h:2642.8,l:2636.4,c:2641.6,bid:390,ask:462},{time:'14:15',o:2641.6,h:2644.1,l:2639.8,c:2640.4,bid:512,ask:401},{time:'14:30',o:2640.4,h:2643.5,l:2637.2,c:2638.1,bid:588,ask:370},{time:'14:45',o:2638.1,h:2640.2,l:2633.6,c:2635.2,bid:641,ask:352},{time:'15:00',o:2635.2,h:2638.9,l:2632.8,c:2637.7,bid:430,ask:512},{time:'15:15',o:2637.7,h:2641.4,l:2636.1,c:2640.8,bid:402,ask:590},{time:'15:30',o:2640.8,h:2644.6,l:2639.5,c:2643.9,bid:380,ask:625},{time:'15:45',o:2643.9,h:2649.2,l:2642.8,c:2648.1,bid:426,ask:610},{time:'16:00',o:2648.1,h:2651.6,l:2646.2,c:2649.4,bid:475,ask:582},{time:'16:15',o:2649.4,h:2652.3,l:2645.7,c:2647.2,bid:558,ask:490},{time:'16:30',o:2647.2,h:2650.1,l:2643.8,c:2645.1,bid:604,ask:418},{time:'16:45',o:2645.1,h:2650.8,l:2644,c:2648.35,bid:447,ask:596}];
 export const DEMO_ZONES=[{id:'B-01',side:'buy',low:2652.5,high:2656.5,strength:.92,label:'Buy-side pool',distance:'+4.15',state:'UNTESTED'},{id:'B-02',side:'buy',low:2649.8,high:2651.4,strength:.68,label:'Local highs',distance:'+1.45',state:'NEAR PRICE'},{id:'S-01',side:'sell',low:2633,high:2636,strength:.81,label:'Sell-side pool',distance:'−12.35',state:'UNTESTED'},{id:'S-02',side:'sell',low:2626.5,high:2630,strength:.57,label:'Session low area',distance:'−18.35',state:'UNTESTED'}];
-export const PRICE_LEVELS=Array.from({length:13},(_,i)=>2654-i*1.5);
+export const PRICE_LEVELS=Array.from({length:15},(_,i)=>2653-i*1.5);
 export const barDelta=b=>b.ask-b.bid;
 export const totalVolume=b=>b.ask+b.bid;
 export function imbalanceRatio(b){const hi=Math.max(b.ask,b.bid),lo=Math.min(b.ask,b.bid);return lo===0?null:hi/lo;}
