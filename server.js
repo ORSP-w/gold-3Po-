@@ -47,7 +47,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (req.method === 'GET' && url.pathname === '/v1/stream') {
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('event: ready\ndata: {"status":"connected"}\n\n'); clients.add(res);
-      req.on('close', () => clients.delete(res)); return;
+      res.on('close', () => clients.delete(res)); return;
     }
     const routes = { '/v1/ingest/mt5/tick': normalizeMt5, '/v1/ingest/comex/trade': normalizeComex };
     const normalize = routes[url.pathname];
