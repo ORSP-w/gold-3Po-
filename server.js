@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { readFile, appendFile, mkdir } from 'node:fs/promises';
 import { timingSafeEqual } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { buildMarketAnalysis } from './market-engine.js';
@@ -35,11 +35,15 @@ function normalizeComex(input) {
 
 export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000 } = {}) {
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set();
+  const dataFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl';
+  const storageReady = (async () => { try { const raw = await readFile(dataFile, 'utf8'); for (const line of raw.split('\n')) { if (!line.trim()) continue; try { const event = JSON.parse(line); events.push(event); const key=event.source+':'+event.symbol; lastSequence.set(key,Math.max(lastSequence.get(key)||0,event.sequence||0)); const receivedAt=Date.parse(event.receivedAt)||Date.now(); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(feeds.get(key)?.accepted||0)+1}); } catch {} } } catch (error) { if (error.code !== 'ENOENT') throw error; } })();
+  async function persist(stored) { await mkdir('./data/', { recursive:true }); await appendFile(dataFile, JSON.stringify(stored)+'\n'); }
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), eventCount: events.length, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
   }
   const server = createServer(async (req, res) => {
+    await storageReady;
     const url = new URL(req.url || '/', 'http://localhost');
     const asset = STATIC_FILES[url.pathname];
     if (req.method === 'GET' && asset) { try { const content = await readFile(new URL('./' + asset[0], import.meta.url)); res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-cache' }); res.end(content); return; } catch { return json(res, 500, { error: 'asset_read_failed' }); } }
@@ -75,7 +79,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
             if (event.sequence <= previous) { rejected++; continue; }
             lastSequence.set(key,event.sequence);
             const receivedAt=now(); const stored={...event,receivedAt:new Date(receivedAt).toISOString(),historical:true};
-            events.push(stored); if(events.length>MAX_EVENTS) events.shift();
+            await persist(stored); events.push(stored); if(events.length>MAX_EVENTS) events.shift();
             const existing=feeds.get(key); feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:event.sequence,receivedAt,accepted:(existing?.accepted||0)+1});
             const packet=`event: market\ndata: ${JSON.stringify(stored)}\n\n`; for(const client of clients) client.write(packet);
             accepted++;
@@ -95,7 +99,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (event.sequence <= previous) return json(res, 409, { error: 'sequence_not_increasing', lastAcceptedSequence: previous });
       lastSequence.set(key, event.sequence);
       const receivedAt = now(); const stored = { ...event, receivedAt: new Date(receivedAt).toISOString() };
-      events.push(stored); if (events.length > MAX_EVENTS) events.shift();
+      await persist(stored); events.push(stored); if (events.length > MAX_EVENTS) events.shift();
       const existing = feeds.get(key); feeds.set(key, { source: event.source, symbol: event.symbol, lastSequence: event.sequence, receivedAt, accepted: (existing?.accepted || 0) + 1 });
       const packet = 'event: market\ndata: ' + JSON.stringify(stored) + '\n\n';
       for (const client of clients) client.write(packet);
