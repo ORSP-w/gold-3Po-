@@ -10,7 +10,7 @@ async function refreshAnalysis(){
   if(data.bars?.length){
    window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
    const mode=document.querySelector('#dataMode');if(mode)mode.textContent='ROBOFOREX MT5 · '+data.bars.length+' BARS';
-   const price=document.querySelector('#referencePrice');if(price)price.textContent=Number(data.bars.at(-1).c).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+   const price=document.querySelector('#referencePrice');if(price)price.textContent=Number(data.bars.at(-1).c).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});const range=document.querySelector('#sessionRange');if(range){const lo=Math.min(...data.bars.map(b=>b.l)),hi=Math.max(...data.bars.map(b=>b.h));range.textContent=lo.toFixed(2)+' — '+hi.toFixed(2);}
    const count=document.querySelector('#barCount');if(count)count.textContent=data.bars.length+' BARS';
    lastAnalysisAt=Date.now();
   }
