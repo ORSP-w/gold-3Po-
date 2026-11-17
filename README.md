@@ -15,7 +15,7 @@ npm run check
 npm start
 ``
 
-The API binds to 127.0.0.1:8787 by default. Configure MT5 WebRequest to allow the exact ingest URL shown in `adapters/mt5/README.md`. Set `HOST=0.0.0.0` only behind a firewall/reverse proxy with TLS.
+The API and market workspace UI are served from the same origin at http://127.0.0.1:8787 by default. Open that URL after `npm start`; the browser subscribes to the SSE feed and displays API/MT5/COMEX health. The separate `npm run serve` command is only a static preview and does not include the live API. Configure MT5 WebRequest to allow the exact ingest URL shown in `adapters/mt5/README.md`. Set `HOST=0.0.0.0` only behind a firewall/reverse proxy with TLS.
 
 ## Part 02 endpoints
 - `GET /health` — configured state, event count, per-feed age and stale/online status.
