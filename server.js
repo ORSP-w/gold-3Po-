@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { buildMarketAnalysis } from './market-engine.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
-const MAX_EVENTS = 200000;
+const MAX_EVENTS = 1000000;
 const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
