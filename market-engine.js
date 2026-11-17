@@ -40,5 +40,30 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     }
     return { time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,levels,imbalances };
   });
-  return { bars:result, tickCount:ticks.length, volumeKind:'broker_tick_volume_or_reported_volume', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
+  const zones = detectLiquidityZones(result, priceStep);
+  return { bars:result, zones, tickCount:ticks.length, volumeKind:'broker_tick_volume_or_reported_volume', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
+}
+
+export function detectLiquidityZones(bars, priceStep = 0.1) {
+  if (!Array.isArray(bars) || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid liquidity input');
+  if (bars.length < 5) return [];
+  const pivots = [];
+  for (let i=2;i<bars.length-2;i++) {
+    const b=bars[i], prev=bars.slice(i-2,i), next=bars.slice(i+1,i+3);
+    if (prev.every(x=>b.h>=x.h) && next.every(x=>b.h>=x.h)) pivots.push({side:'buy',price:b.h,index:i});
+    if (prev.every(x=>b.l<=x.l) && next.every(x=>b.l<=x.l)) pivots.push({side:'sell',price:b.l,index:i});
+  }
+  const groups=[];
+  for(const pivot of pivots.sort((a,b)=>a.price-b.price)){
+    let group=groups.find(g=>g.side===pivot.side && Math.abs(g.price-pivot.price)<=priceStep*3);
+    if(!group){group={side:pivot.side,prices:[],indices:[]};groups.push(group);}
+    group.prices.push(pivot.price);group.indices.push(pivot.index);group.price=group.prices.reduce((a,b)=>a+b,0)/group.prices.length;
+  }
+  const last=bars.at(-1).c;
+  return groups.filter(g=>g.indices.length>=2).map((g,i)=>{
+    const low=Math.min(...g.prices)-priceStep,high=Math.max(...g.prices)+priceStep;
+    const strength=Math.min(0.98,0.45+g.indices.length*0.12);
+    const distance=g.price-last;
+    return {id:'LQ-'+g.side+'-'+i,side:g.side,low,high,strength,label:g.side==='buy'?'Repeated swing highs':'Repeated swing lows',distance:(distance>0?'+':'')+distance.toFixed(2),state:Math.abs(distance)<=priceStep*5?'NEAR PRICE':'UNTESTED'};
+  }).sort((a,b)=>b.strength-a.strength).slice(0,8);
 }
