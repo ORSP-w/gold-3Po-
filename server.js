@@ -10,9 +10,9 @@ const validTimestamp = value => typeof value === 'string' && Number.isFinite(Dat
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
-    let body = ''; let bytes = 0;
-    req.on('data', chunk => { bytes += chunk.length; if (bytes > MAX_BODY_BYTES) { reject(Object.assign(new Error('Payload too large'), { status: 413 })); req.destroy(); return; } body += chunk; });
-    req.on('end', () => { try { resolve(JSON.parse(body)); } catch { reject(Object.assign(new Error('Body must be valid JSON'), { status: 400 })); } });
+    let body = ''; let bytes = 0; let tooLarge = false;
+    req.on('data', chunk => { bytes += chunk.length; if (bytes > MAX_BODY_BYTES) { tooLarge = true; return; } if (!tooLarge) body += chunk; });
+    req.on('end', () => { if (tooLarge) { reject(Object.assign(new Error('Payload too large'), { status: 413 })); return; } try { resolve(JSON.parse(body)); } catch { reject(Object.assign(new Error('Body must be valid JSON'), { status: 400 })); } });
     req.on('error', reject);
   });
 }
