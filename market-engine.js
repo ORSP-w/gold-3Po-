@@ -62,7 +62,7 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
   });
   const zones = detectLiquidityZones(result, priceStep);
-  return { bars:result, zones, tickCount:ticks.length, volumeKind:'broker_tick_volume_or_reported_volume', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
+  return { bars:result, zones, tickCount:ticks.length, volumeKind:'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
 }
 
 export function detectLiquidityZones(bars, priceStep = 0.1) {
