@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMarketAnalysis, normalizeTick } from './market-engine.js';
+import { buildMarketAnalysis, normalizeTick, detectLiquidityZones } from './market-engine.js';
 
 const tick=(timestamp,last,aggressorSide='unknown',sequence=1)=>({timestamp,bid:last-0.1,ask:last+0.1,last,tickVolume:99,realVolume:5,aggressorSide,sequence,source:'mt5',symbol:'XAUUSD'});
 test('normalizer does not mistake repeated OTC quote volume for executed volume',()=>{
@@ -49,4 +49,11 @@ test('analysis calculates cumulative delta and leaves absorption unavailable wit
  assert.equal(out.bars[0].absorption,false);
  assert.ok(Array.isArray(out.bars[0].stackedImbalances));
  assert.ok(Array.isArray(out.bars[0].sweeps));
+});
+
+test('liquidity detector groups repeated swing highs into buy-side pools',()=>{
+ const highs=[9,10,12,10,9,10,12.1,10,9],bars=highs.map((h,i)=>({h,l:h-2,o:h-1,c:h-1}));
+ const zones=detectLiquidityZones(bars,0.1);
+ assert.ok(zones.some(z=>z.side==='buy'));
+ assert.ok(zones.some(z=>z.side==='buy'&&z.high>12&&z.low<12.1));
 });
