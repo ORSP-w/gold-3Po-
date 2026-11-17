@@ -73,6 +73,9 @@ try {
   await page.waitForFunction(() => document.querySelector('#comexStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
   await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
   assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day history, not remain at 12 fixture candles');
+  await page.locator('.candle[data-index="0"]').click();
+  assert.match(await page.locator('#selectedBar').innerText(), /#001/);
+  assert.ok(await page.locator('.foot-cell[data-index="0"]').count() > 0, 'footprint window should follow a selected historical candle');
 
   await mkdir('artifacts', { recursive:true });
   await page.screenshot({ path:'artifacts/market-lab-desktop.png', fullPage:true });
