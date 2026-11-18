@@ -8,7 +8,8 @@ input string IngestToken = "";
 input int MinIntervalMs = 100;
 input int RequestTimeoutMs = 5000;
 input int HistoryDays = 30;
-input int HistoryBatchSize = 100;
+input int HistoryBatchSize = 1000;
+input int HistoryRetryMinutes = 15;
 
 ulong sequenceNumber = 0;
 ulong lastSentAt = 0;
@@ -16,7 +17,8 @@ long lastTickMsc = 0;
 double lastBid = 0, lastAsk = 0, lastLast = 0;
 ulong lastVolume = 0;
 string sequenceKey = "";
-int lastHttpStatus = 0;
+bool historySynchronized = false;
+ulong nextHistoryRetryAt = 0;
 
 string TickStamp(const long timeMsc)
 {
@@ -52,20 +54,23 @@ bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong 
       MqlTick tick = ticks[first+i];
       historySequence++;
       double lastPrice = tick.last > 0 ? tick.last : (tick.bid + tick.ask) / 2.0;
+      string eventId = StringFormat("%s-%I64d-%I64u", _Symbol, tick.time_msc, historySequence);
       if(i > 0) body += ",";
       body += StringFormat(
-         "{\"timestamp\":\"%s\",\"sequence\":%I64u,\"bid\":%.10f,\"ask\":%.10f,\"last\":%.10f,\"tickVolume\":%I64u,\"realVolume\":%.4f,\"flags\":%u}",
-         TickStamp(tick.time_msc), historySequence, tick.bid, tick.ask, lastPrice, tick.volume, tick.volume_real, tick.flags
+         "{\"timestamp\":\"%s\",\"sequence\":%I64u,\"eventId\":\"%s\",\"bid\":%.10f,\"ask\":%.10f,\"last\":%.10f,\"tickVolume\":%I64u,\"realVolume\":%.4f,\"flags\":%u}",
+         TickStamp(tick.time_msc), historySequence, eventId, tick.bid, tick.ask, lastPrice, tick.volume, tick.volume_real, tick.flags
       );
    }
    body += "]}";
    return PostJson(HistoryUrl, body);
 }
 
-void SyncHistory()
+bool SyncHistory()
 {
    int days = MathMax(1, MathMin(HistoryDays, 90));
-   int batchSize = MathMax(10, MathMin(HistoryBatchSize, 250));
+   int batchSize = MathMax(10, MathMin(HistoryBatchSize, 1000));
+   bool complete = true;
+   ulong totalTicks = 0;
    ulong historySequence = 0;
    datetime endTime = TimeGMT();
    datetime startTime = endTime - days * 86400;
@@ -81,6 +86,7 @@ void SyncHistory()
       if(copied < 0)
       {
          Print("GOLD-3Po: history chunk unavailable at ", TimeToString(cursor), " error=", GetLastError());
+         complete = false;
          continue;
       }
       for(int offset=0; offset<copied; offset+=batchSize)
@@ -88,12 +94,16 @@ void SyncHistory()
          int count = MathMin(batchSize, copied-offset);
          if(!SendHistoryBatch(ticks, offset, count, historySequence))
          {
-            Print("GOLD-3Po: history upload interrupted; reconnect and restart EA to retry.");
-            return;
+            Print("GOLD-3Po: history upload interrupted; live feed will continue and history sync will retry.");
+            complete = false;
+            break;
          }
+         totalTicks += (ulong)count;
       }
    }
-   Print("GOLD-3Po: history sync finished; accepted sequence range 1..", historySequence);
+   if(complete) Print("GOLD-3Po: history sync completed. Ticks uploaded: ", totalTicks, ". Repeated ticks are de-duplicated by the API.");
+   else Print("GOLD-3Po: history sync incomplete. Will retry after ", HistoryRetryMinutes, " minutes.");
+   return complete;
 }
 
 int OnInit()
@@ -108,7 +118,8 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
    if(!SymbolSelect(_Symbol, true)) return INIT_FAILED;
-   SyncHistory();
+   historySynchronized = SyncHistory();
+   nextHistoryRetryAt = GetTickCount64() + (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
    EventSetMillisecondTimer(MathMax(100, MinIntervalMs));
    Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes enabled.");
    return INIT_SUCCEEDED;
@@ -119,6 +130,11 @@ void OnDeinit(const int reason) { EventKillTimer(); }
 void OnTimer()
 {
    ulong nowMs = GetTickCount64();
+   if(!historySynchronized && nowMs >= nextHistoryRetryAt)
+   {
+      historySynchronized = SyncHistory();
+      nextHistoryRetryAt = nowMs + (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
+   }
    if(lastSentAt != 0 && nowMs - lastSentAt < (ulong)MathMax(10, MinIntervalMs)) return;
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
