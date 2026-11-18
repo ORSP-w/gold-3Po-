@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const port = 8787;
 const base = 'http://127.0.0.1:' + port;
 const token = 'browser-test-token-which-is-long-enough';
-const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), MARKET_INGEST_TOKEN: token }, stdio: 'ignore' });
+const isolatedDataFile = '/tmp/gold-3po-browser-' + process.pid + '.jsonl';
+const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), MARKET_INGEST_TOKEN: token, MARKET_DATA_FILE: isolatedDataFile }, stdio: 'ignore' });
 let browser;
 try {
   let ready = false;
@@ -106,4 +107,5 @@ try {
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');
+  await rm(isolatedDataFile,{force:true});
 }
