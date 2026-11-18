@@ -4,6 +4,7 @@ $logs = Join-Path $root "logs"
 New-Item -ItemType Directory -Force -Path $logs, (Join-Path $root "data") | Out-Null
 
 function Show-Failure([string]$message) {
+    if ($env:GOLD3PO_NO_BROWSER -eq "1") { return }
     try {
         Add-Type -AssemblyName System.Windows.Forms
         [System.Windows.Forms.MessageBox]::Show($message, "GOLD-3Po Market Lab", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) | Out-Null
