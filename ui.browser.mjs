@@ -22,8 +22,6 @@ try {
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.goto(base, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.foot-cell');
-  const chartDebug = await page.locator('#priceChart').evaluate(el=>({barCount:document.querySelector('#barCount')?.textContent,candles:el.querySelectorAll('.candle').length,svgChildren:el.children.length,svgText:el.innerHTML.slice(0,1200)}));
-  process.stdout.write('Initial chart diagnostic: '+JSON.stringify(chartDebug)+'\\n');
   assert.equal(await page.locator('.candle').count(), 12, '12 price bars should render');
   assert.equal(await page.locator('.foot-cell').count(), 180, '15 price levels × 12 bars should render');
   assert.equal(await page.locator('.zone-row').count(), 4, 'four liquidity zones should render');
