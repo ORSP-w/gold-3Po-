@@ -37,11 +37,22 @@
       "backtest-engine.js",
       "risk-engine.js",
       "server.js",
-      "adapters/mt5/Gold3PoBridge.mq5",
-      "adapters/mt5/README.md",
-      "adapters/comex/README.md",
       "README.md",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "adapters/mt5/Gold3PoBridge.mq5",
+        "to": "adapters/mt5/Gold3PoBridge.mq5"
+      },
+      {
+        "from": "adapters/mt5/README.md",
+        "to": "adapters/mt5/README.md"
+      },
+      {
+        "from": "adapters/comex/README.md",
+        "to": "adapters/comex/README.md"
+      }
     ],
     "win": {
       "target": [

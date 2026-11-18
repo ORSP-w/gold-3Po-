@@ -34,6 +34,7 @@ async function readOrCreateSettings(userDataPath) {
 
     const settings = {
       marketIngestToken: randomBytes(32).toString('hex'),
+      port: 8787,
       createdAt: new Date().toISOString()
     };
     await writeFile(settingsPath, JSON.stringify(settings, null, 2) + '\n', { encoding: 'utf8', flag: 'wx' });
@@ -41,7 +42,7 @@ async function readOrCreateSettings(userDataPath) {
   }
 }
 
-function listen(server) {
+function listen(server, port) {
   return new Promise((resolve, reject) => {
     const onError = error => {
       server.off('listening', onListening);
@@ -53,7 +54,7 @@ function listen(server) {
     };
     server.once('error', onError);
     server.once('listening', onListening);
-    server.listen(0, '127.0.0.1');
+    server.listen(port, '127.0.0.1');
   });
 }
 
@@ -62,13 +63,18 @@ async function startLocalApi() {
   await mkdir(userDataPath, { recursive: true });
 
   const settings = await readOrCreateSettings(userDataPath);
+  const port = Number(settings.port || 8787);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    throw new Error('The local API port in settings.json must be between 1024 and 65535.');
+  }
+
   const storagePath = path.join(userDataPath, 'market-events.jsonl');
   marketServer = createMarketServer({
     token: settings.marketIngestToken,
     storageFile: storagePath
   }).server;
 
-  const address = await listen(marketServer);
+  const address = await listen(marketServer, port);
   localOrigin = `http://127.0.0.1:${address.port}`;
   return localOrigin;
 }
@@ -177,10 +183,13 @@ function handleStartupFailure(error) {
     return;
   }
 
+  const reason = error?.code === 'EADDRINUSE'
+    ? 'Local port 8787 is already in use. Close the other application using it and restart GOLD-3Po.'
+    : (error instanceof Error ? error.message : String(error));
+
   dialog.showErrorBox(
     'GOLD-3Po Market Lab',
-    'The application could not start its local market service. Check the application data folder and restart the app.\n\n' +
-      (error instanceof Error ? error.message : String(error))
+    'The application could not start its local market service.\n\n' + reason
   );
   app.exit(1);
 }

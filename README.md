@@ -12,7 +12,7 @@ GOLD-3Po is a read-only market-structure research workspace. It does not route, 
 
 ## Windows desktop application
 
-The Windows desktop build uses Electron. It opens GOLD-3Po in its own application window and runs the market API locally on loopback; it does not open an external browser and does not require a separate Node.js installation.
+The Windows desktop build uses Electron. It opens GOLD-3Po in its own application window and runs the market API locally on `127.0.0.1:8787`; it does not open an external browser and does not require a separate Node.js installation.
 
 Download **GOLD-3Po-Setup-*.exe** from the latest GitHub release, run the installer, and follow the setup wizard. The installer creates Start Menu and desktop shortcuts. It is a per-user install and does not require administrator rights.
 
@@ -20,6 +20,8 @@ On first launch, the application creates a local ingestion token and settings fi
 
 - Windows settings: `%APPDATA%\GOLD-3Po Market Lab\settings.json`
 - Market archive: `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`
+
+The packaged MT5 Expert Advisor source is installed under `resources\adapters\mt5\Gold3PoBridge.mq5` inside the application directory. The token used in MT5 is the `marketIngestToken` value in `settings.json`. Add `http://127.0.0.1:8787` to the MT5 WebRequest allow-list.
 
 The installer workflow runs unit tests and JavaScript syntax checks, packages the Windows x64 NSIS installer, installs it on a clean runner, starts the installed application in smoke-test mode, and publishes the installer with a SHA-256 checksum. The installer is not code-signed; Windows may show an unknown-publisher warning.
 
@@ -41,7 +43,7 @@ npm install
 npm run dist:win
 ```
 
-The setup executable is written to `release/\`.
+The setup executable is written to the `release` directory.
 
 ## Run the API without Electron
 

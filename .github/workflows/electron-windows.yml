@@ -9,6 +9,7 @@ on:
       - "electron/**"
       - "package.json"
       - "README.md"
+      - "RELEASE-TEST-NOTES.md"
       - "server.js"
       - "index.html"
       - "app.js"
@@ -77,17 +78,15 @@ jobs:
           $ErrorActionPreference = "Stop"
           $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
           $installDir = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke"
-          $installLog = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Install.log"
           New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
-          $install = Start-Process -FilePath $installer.FullName -ArgumentList @("/S", "/D=$installDir", "/LOG=$installLog") -PassThru
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @("/S", "/D=$installDir") -PassThru
           if (-not $install.WaitForExit(120000)) {
             Stop-Process -Id $install.Id -Force -ErrorAction SilentlyContinue
             throw "Electron NSIS installation timed out."
           }
           if ($install.ExitCode -ne 0) {
-            $tail = if (Test-Path $installLog) { (Get-Content $installLog -Tail 50) -join [Environment]::NewLine } else { "No NSIS install log." }
-            throw ("NSIS installer failed with exit code " + $install.ExitCode + [Environment]::NewLine + $tail)
+            throw ("NSIS installer failed with exit code " + $install.ExitCode)
           }
 
           $appExe = Join-Path $installDir "GOLD-3Po Market Lab.exe"
@@ -109,7 +108,7 @@ jobs:
             throw ("Packaged Electron application smoke test failed. Exit code: " + $smoke.ExitCode + [Environment]::NewLine + $out + [Environment]::NewLine + $err)
           }
 
-          Write-Host "PASS: installer installs and the packaged Electron app starts its local API and serves the UI."
+          Write-Host "PASS: installer installs and the packaged Electron app starts its local API on port 8787 and serves the UI."
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
