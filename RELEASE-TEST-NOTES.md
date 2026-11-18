@@ -9,7 +9,15 @@
 
 The application bundles Electron and its Chromium runtime. A separate Node.js installation, browser window, PowerShell command or ZIP extraction is not required.
 
-Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local market archive is stored in `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`. These files are outside the installation folder and are retained when the application is updated or uninstalled.
+Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local market archive is stored in `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`. The licence key and clock watermark are stored in `license.json` / `license-state.json` in the same folder. These files are outside the installation folder and are retained when the application is updated or uninstalled.
+
+## Activate the licence
+
+1. On first launch an activation screen covers the workspace and shows this computer's **Machine ID** (Copy button).
+2. Send the Machine ID to the vendor. The vendor issues a signed key: `node tools/make-key.js issue --days 30 --machine <ID>`.
+3. Paste the whole `GOLD1.…` key into the activation field and press **Activate licence**. No internet is used.
+4. The status panel shows `Licence · ACTIVE · Nd LEFT`. When the term expires the activation screen returns; ingest keeps recording data in the background.
+5. Rolling the system clock back more than 5 minutes (against the stored watermark or the MT5 feed time) blocks the licence with `CLOCK ROLLBACK` until the correct time is restored.
 
 ## Connect RoboForex MT5
 
@@ -25,12 +33,14 @@ The EA is data-only. It cannot place or manage orders. Keep it on a demo account
 ## What to check
 
 - The main desktop window opens without an external browser.
+- Without a licence the activation screen appears; a valid key for this Machine ID unlocks the workspace, a key for another PC is rejected.
 - API, MT5 and COMEX connection indicators reflect feed status.
 - Chart and footprint update as broker ticks arrive.
 - Replay loads a date range, plays, pauses, and returns to live view.
 - Backtesting reports trades and metrics when qualifying historical setups exist.
 - Risk plan blocks risk above 1% and reward/risk below 1.5:1.
-- After closing and reopening the app, imported market history remains available.
+- After closing and reopening the app, imported market history and the activated licence remain available.
+- Non-gold symbols (e.g. EURUSD) are rejected by the API; only XAUUSD/GC data is accepted.
 
 An empty replay or zero backtest trades can be a valid result when there is not enough available broker history or no qualifying liquidity-sweep setup.
 

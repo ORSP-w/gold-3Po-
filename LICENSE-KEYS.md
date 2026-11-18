@@ -44,8 +44,10 @@ Send the printed `GOLD1.…` string to the customer through any channel.
    shows the **Machine ID** of this computer (with a Copy button).
 2. Send the Machine ID to the vendor and receive a key.
 3. Paste the whole `GOLD1.…` string and press **Activate licence**.
-4. The key is stored in `data/license.json` beside the installation and survives app
-   updates. The status panel shows remaining days; the screen reappears on expiry.
+4. The key is stored beside the application data and survives app updates:
+   - Electron desktop: `%APPDATA%\GOLD-3Po Market Lab\license.json` (+ `license-state.json`).
+   - Plain Node server: `data/license.json` (+ `data/license-state.json`).
+   The status panel shows remaining days; the activation screen reappears on expiry.
 
 ## Clock-rollback protection
 
@@ -59,8 +61,10 @@ invalidates the licence with `clock_rollback` until the correct time is restored
 - The watermark file is local and best effort: deleting `data/license-state.json` resets
   it. The feed-time check still catches rollback while live data arrives.
 - Node.js source is readable; a determined person could patch the check out of
-  `server.js`. Signed keys prevent **key forgery and casual sharing**, not reverse
-  engineering. This is the same trade-off every offline-licensed desktop app makes.
+  `server.js`. The Electron build packs sources into `app.asar`, which raises the bar
+  slightly but is still extractable. Signed keys prevent **key forgery and casual
+  sharing**, not reverse engineering. This is the same trade-off every offline-licensed
+  desktop app makes.
 - There is no online revocation. Prefer shorter terms (30–90 days) for subscriptions;
   a stolen key stops working at its natural expiry.
 - If the vendor private key leaks, anyone can issue keys. Keep it offline, back it up,

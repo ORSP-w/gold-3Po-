@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createMarketServer } from '../server.js';
+import { createLicenseManager } from '../license.js';
 
 app.setName('GOLD-3Po Market Lab');
 app.setPath('userData', path.join(app.getPath('appData'), 'GOLD-3Po Market Lab'));
@@ -69,9 +70,16 @@ async function startLocalApi() {
   }
 
   const storagePath = path.join(userDataPath, 'market-events.jsonl');
+  // Licence state lives beside the market archive in userData so it survives
+  // app updates and is never written inside the read-only asar package.
+  const license = createLicenseManager({
+    licenseFile: path.join(userDataPath, 'license.json'),
+    stateFile: path.join(userDataPath, 'license-state.json')
+  });
   marketServer = createMarketServer({
     token: settings.marketIngestToken,
-    storageFile: storagePath
+    storageFile: storagePath,
+    license
   }).server;
 
   const address = await listen(marketServer, port);
@@ -155,9 +163,16 @@ async function runSmokeTest() {
     throw new Error('The packaged application HTML is missing required workspace elements.');
   }
 
-  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/styles.css']) {
+  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/styles.css']) {
     const response = await fetch(localOrigin + asset, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Application asset ${asset} returned HTTP ${response.status}.`);
+  }
+
+  const licenseResponse = await fetch(`${localOrigin}/v1/license/status`, { signal: AbortSignal.timeout(10000) });
+  if (!licenseResponse.ok) throw new Error(`Licence status endpoint returned HTTP ${licenseResponse.status}.`);
+  const licenseStatus = await licenseResponse.json();
+  if (typeof licenseStatus.machineId !== 'string' || !licenseStatus.machineId) {
+    throw new Error('The licence endpoint did not report a machine ID.');
   }
 
   process.stdout.write('GOLD3PO_ELECTRON_SMOKE_OK\n');

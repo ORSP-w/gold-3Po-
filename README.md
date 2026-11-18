@@ -1,6 +1,6 @@
 # GOLD-3Po — Market Lab
 
-GOLD-3Po is a read-only market-structure research workspace. It does not route, place, modify or close trades.
+GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUUSD via MT5, GC futures via COMEX). It does not route, place, modify or close trades, and it rejects non-gold symbols at the ingest boundary.
 
 ## Implemented parts
 
@@ -21,6 +21,9 @@ On first launch, the application creates a local ingestion token and settings fi
 
 - Windows settings: `%APPDATA%\GOLD-3Po Market Lab\settings.json`
 - Market archive: `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`
+- Licence key and clock watermark: `%APPDATA%\GOLD-3Po Market Lab\license.json` and `license-state.json`
+
+On first launch an activation screen shows this computer's **Machine ID**. Send it to the vendor, receive a signed `GOLD1.…` key and paste it to activate. Keys are bound to one computer and valid 1–9999 days; everything is verified offline. See `LICENSE-KEYS.md`.
 
 The packaged MT5 Expert Advisor source is installed under `resources\adapters\mt5\Gold3PoBridge.mq5` inside the application directory. The token used in MT5 is the `marketIngestToken` value in `settings.json`. Add `http://127.0.0.1:8787` to the MT5 WebRequest allow-list.
 
@@ -58,7 +61,7 @@ Open `http://127.0.0.1:8787`. The API and UI are served from the same origin. `n
 
 ## API
 
-All ingest endpoints require `Authorization: Bearer <MARKET_INGEST_TOKEN>`. Analysis, replay, backtest, signals, risk and SSE additionally require a valid offline licence key (`402 license_required` otherwise); ingest and health stay open so expired licences never lose market data.
+All ingest endpoints require `Authorization: Bearer <MARKET_INGEST_TOKEN>` and accept gold symbols only: `XAUUSD` (including broker suffix variants such as `XAUUSD.`) for MT5 and `GC…` futures for COMEX; other symbols return `422`. Analysis, replay, backtest, signals, risk and SSE additionally require a valid offline licence key (`402 license_required` otherwise); ingest and health stay open so expired licences never lose market data.
 
 - `GET /health` — server, storage, feed freshness and active SSE clients.
 - `GET /v1/license/status` — licence state and this computer's Machine ID (always open).

@@ -32,63 +32,81 @@ test('feed health changes to stale after the configured threshold',async()=>{let
 
 test('oversized request bodies return 413 and server remains usable',async()=>{const huge='x'.repeat(1025*1024);const r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:huge});assert.equal(r.status,413);const h=await fetch(base+'/health');assert.equal(h.status,200);});
 
-test('same-origin server serves market lab UI and assets',async()=>{const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);const markup=await page.text();assert.match(markup,/market-client\.js/);for(const asset of ['/app.js','/market-data.js','/market-client.js','/market-engine.js','/styles.css']){const r=await fetch(base+asset);assert.equal(r.status,200,asset);}});
+test('same-origin server serves market lab UI and assets',async()=>{const page=await fetch(base+'/');assert.equal(page.status,200);assert.match(page.headers.get('content-type'),/text\/html/);const markup=await page.text();assert.match(markup,/market-client\.js/);for(const asset of ['/app.js','/market-data.js','/market-client.js','/market-engine.js','/styles.css','/license-client.js']){const r=await fetch(base+asset);assert.equal(r.status,200,asset);}});
 
 test('MT5 history batches are authenticated and aggregated into candles and footprint levels',async()=>{
- const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
- const r=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
- const body=await r.json();assert.equal(r.status,202);assert.equal(body.accepted,2);
- const a=await fetch(base+'/v1/market/analysis?symbol=XAUUSD&intervalMs=900000');const data=await a.json();
- assert.equal(a.status,200);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,2);assert.equal(data.bars[0].unknown,2);assert.equal(data.bars[0].ask,0);assert.equal(data.bars[0].levels.length,1);
+  const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
+  const r=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+  const body=await r.json();assert.equal(r.status,202);assert.equal(body.accepted,2);
+  const a=await fetch(base+'/v1/market/analysis?symbol=XAUUSD&intervalMs=900000');const data=await a.json();
+  assert.equal(a.status,200);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,2);assert.equal(data.bars[0].unknown,2);assert.equal(data.bars[0].ask,0);assert.equal(data.bars[0].levels.length,1);
 });
 test('MT5 history endpoint rejects oversized batches and missing authentication',async()=>{
- const body=JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:[mt5()]});
- const noAuth=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{'content-type':'application/json'},body});assert.equal(noAuth.status,401);
- const tooMany=Array.from({length:1001},(_,i)=>({...mt5(i+1)}));
- const large=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:tooMany})});assert.equal(large.status,422);
+  const body=JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:[mt5()]});
+  const noAuth=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{'content-type':'application/json'},body});assert.equal(noAuth.status,401);
+  const tooMany=Array.from({length:1001},(_,i)=>({...mt5(i+1)}));
+  const large=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:tooMany})});assert.equal(large.status,422);
 });
 
 test('re-importing MT5 history is idempotent even when the rolling history sequence changes',async()=>{
- const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,eventId:'XAUUSD-history-'+sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
- const send=items=>fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:items})});
- const first=await (await send(ticks)).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);
- const shifted=ticks.map(tick=>({...tick,sequence:tick.sequence+1000}));
- const second=await (await send(shifted)).json();assert.equal(second.accepted,0);assert.equal(second.duplicates,2);
- const live=mt5(1);live.timestamp='2026-11-17T16:00:00.000Z';
- const liveResponse=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(live)});
- assert.equal(liveResponse.status,202,'historical batch sequences must not block the independent live sequence');
+  const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,eventId:'XAUUSD-history-'+sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
+  const send=items=>fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:items})});
+  const first=await (await send(ticks)).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);
+  const shifted=ticks.map(tick=>({...tick,sequence:tick.sequence+1000}));
+  const second=await (await send(shifted)).json();assert.equal(second.accepted,0);assert.equal(second.duplicates,2);
+  const live=mt5(1);live.timestamp='2026-11-17T16:00:00.000Z';
+  const liveResponse=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(live)});
+  assert.equal(liveResponse.status,202,'historical batch sequences must not block the independent live sequence');
 });
 test('replay returns chronologically aggregated historical bars for a requested range',async()=>{
- const ticks=[1,2,3].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
- await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
- const response=await fetch(base+'/v1/market/replay?symbol=XAUUSD&from=2026-11-17T15:00:00.000Z&to=2026-11-17T16:00:00.000Z');
- const data=await response.json();assert.equal(response.status,200);assert.equal(data.eventCount,3);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,3);
+  const ticks=[1,2,3].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
+  await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+  const response=await fetch(base+'/v1/market/replay?symbol=XAUUSD&from=2026-11-17T15:00:00.000Z&to=2026-11-17T16:00:00.000Z');
+  const data=await response.json();assert.equal(response.status,200);assert.equal(data.eventCount,3);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,3);
 });
 test('backtest and signal monitor endpoints return explicit empty-history states',async()=>{
- const [backtest,signals]=await Promise.all([
-  fetch(base+'/v1/market/backtest?symbol=XAUUSD'),
-  fetch(base+'/v1/market/signals?symbol=XAUUSD')
- ]);
- const bt=await backtest.json(),sig=await signals.json();
- assert.equal(backtest.status,200);assert.equal(bt.summary.trades,0);assert.equal(bt.summary.winRate,null);
- assert.equal(signals.status,200);assert.equal(sig.latest,null);assert.equal(sig.calibration.minimumSamples,30);
+  const [backtest,signals]=await Promise.all([
+    fetch(base+'/v1/market/backtest?symbol=XAUUSD'),
+    fetch(base+'/v1/market/signals?symbol=XAUUSD')
+  ]);
+  const bt=await backtest.json(),sig=await signals.json();
+  assert.equal(backtest.status,200);assert.equal(bt.summary.trades,0);assert.equal(bt.summary.winRate,null);
+  assert.equal(signals.status,200);assert.equal(sig.latest,null);assert.equal(sig.calibration.minimumSamples,30);
 });
 test('risk endpoint enforces sizing and reward-risk guardrails',async()=>{
- const ok=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=0.5&entry=2650&stop=2645&target=2660&pointValue=1')).json();
- const blocked=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=2&entry=2650&stop=2645&target=2652&pointValue=1')).json();
- assert.equal(ok.allowed,true);assert.equal(ok.quantity,10);assert.equal(blocked.allowed,false);
+  const ok=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=0.5&entry=2650&stop=2645&target=2660&pointValue=1')).json();
+  const blocked=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=2&entry=2650&stop=2645&target=2652&pointValue=1')).json();
+  assert.equal(ok.allowed,true);assert.equal(ok.quantity,10);assert.equal(blocked.allowed,false);
 });
 
 test('live MT5 batch preserves sequence order and safely retries an already ingested payload',async()=>{
- const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T17:0'+sequence+':00.000Z',sequence:100+sequence,eventId:'LIVE-'+(100+sequence),bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
- const send=()=>fetch(base+'/v1/ingest/mt5/live-batch',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
- const first=await (await send()).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);assert.equal(first.lastAcceptedSequence,102);
- const retry=await (await send()).json();assert.equal(retry.accepted,0);assert.equal(retry.duplicates,2);
+  const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T17:0'+sequence+':00.000Z',sequence:100+sequence,eventId:'LIVE-'+(100+sequence),bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
+  const send=()=>fetch(base+'/v1/ingest/mt5/live-batch',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+  const first=await (await send()).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);assert.equal(first.lastAcceptedSequence,102);
+  const retry=await (await send()).json();assert.equal(retry.accepted,0);assert.equal(retry.duplicates,2);
 });
 test('COMEX events can be analysed as actual exchange trades, not broker quotes',async()=>{
- const event={source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T18:00:00.000Z',sequence:1,tradeId:'gc-trade-1',price:2650.1,size:3,aggressorSide:'buy'};
- const ingest=await fetch(base+'/v1/ingest/comex/trade',{method:'POST',headers:auth,body:JSON.stringify(event)});
- assert.equal(ingest.status,202);
- const response=await fetch(base+'/v1/market/analysis?source=comex&symbol=GCZ6&intervalMs=900000');
- const analysis=await response.json();assert.equal(response.status,200);assert.equal(analysis.source,'comex');assert.equal(analysis.bars[0].volume,3);assert.equal(analysis.volumeKind,'exchange_trade_size');
+  const event={source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T18:00:00.000Z',sequence:1,tradeId:'gc-trade-1',price:2650.1,size:3,aggressorSide:'buy'};
+  const ingest=await fetch(base+'/v1/ingest/comex/trade',{method:'POST',headers:auth,body:JSON.stringify(event)});
+  assert.equal(ingest.status,202);
+  const response=await fetch(base+'/v1/market/analysis?source=comex&symbol=GCZ6&intervalMs=900000');
+  const analysis=await response.json();assert.equal(response.status,200);assert.equal(analysis.source,'comex');assert.equal(analysis.bars[0].volume,3);assert.equal(analysis.volumeKind,'exchange_trade_size');
+});
+
+test('gold-only boundary rejects non-gold symbols and accepts broker suffix variants',async()=>{
+  const eur={...mt5(1),symbol:'EURUSD'};
+  let r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(eur)});
+  assert.equal(r.status,422);assert.match((await r.json()).message,/gold-only/);
+  const oil={...comex(1),symbol:'CLZ6'};
+  r=await fetch(base+'/v1/ingest/comex/trade',{method:'POST',headers:auth,body:JSON.stringify(oil)});
+  assert.equal(r.status,422);
+  const suffix={...mt5(1),symbol:'XAUUSD.'};
+  r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(suffix)});
+  assert.equal(r.status,202);assert.equal((await r.json()).event.symbol,'XAUUSD.');
+  const history=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'EURUSD',ticks:[mt5(1)]})});
+  assert.equal((await history.json()).rejected,1);
+  const analysis=await fetch(base+'/v1/market/analysis?symbol=EURUSD');
+  assert.equal(analysis.status,400);assert.equal((await analysis.json()).error,'symbol_not_gold');
+  const gc=await fetch(base+'/v1/market/analysis?source=comex&symbol=GCZ6');
+  assert.equal(gc.status,200);
 });

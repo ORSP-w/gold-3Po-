@@ -18,6 +18,9 @@ const money = value => Number(value).toLocaleString(undefined,{minimumFractionDi
 const notify = message => {
   if (status) status.textContent = message;
 };
+const apiError = (data, fallback) => data?.error === 'license_required'
+  ? 'Licence required — activate your key on the licence screen.'
+  : (data?.message || data?.error || fallback);
 
 function stopReplay() {
   if (replayTimer !== null) window.clearInterval(replayTimer);
@@ -36,7 +39,8 @@ async function exitReplay() {
   try {
     const response = await fetch('/v1/market/analysis?symbol=XAUUSD&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
     const data = await response.json();
-    if (response.ok && data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
+    if (!response.ok) { notify(apiError(data,'Could not refresh live data')); return; }
+    if (data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
     notify('Returned to current broker feed.');
   } catch(error) { notify('Could not refresh live data: '+error.message); }
 }
@@ -60,7 +64,7 @@ async function loadReplay() {
   try {
     const response = await fetch('/v1/market/replay?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || data.error || 'Replay request failed');
+    if (!response.ok) throw new Error(apiError(data,'Replay request failed'));
     replayBars = data.bars || [];
     if (!replayBars.length) {
       $('replaySlider').disabled = true;
@@ -103,7 +107,7 @@ async function runBacktest() {
   try {
     const response = await fetch('/v1/market/backtest?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || data.error || 'Backtest failed');
+    if (!response.ok) throw new Error(apiError(data,'Backtest failed'));
     const s = data.summary;
     $('backtestSummary').textContent = `${s.trades} trades · ${s.wins}W / ${s.losses}L · ${s.winRate===null?'—':(s.winRate*100).toFixed(1)+'%'} win rate · ${s.netPnl>=0?'+':''}${money(s.netPnl)} P&L · ${s.maxDrawdownPct.toFixed(2)}% max drawdown`;
     $('backtestDetails').textContent = s.trades
@@ -126,7 +130,7 @@ async function calculateRisk() {
   try {
     const response = await fetch('/v1/risk/plan?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.message || data.error || 'Risk calculation failed');
+    if (!response.ok) throw new Error(apiError(data,'Risk calculation failed'));
     $('riskResult').textContent = `${data.allowed?'PLAN PASSES GUARDRAILS':'PLAN BLOCKED'} · ${data.direction||'INVALID DIRECTION'} · size ${data.quantity.toFixed(4)} units · planned loss ${money(data.plannedLoss)} · target gain ${money(data.plannedGain)} · R:R ${data.riskReward.toFixed(2)}:1`;
     $('riskChecks').textContent = data.checks.map(item=>(item.passed?'PASS':'BLOCK')+' — '+item.message).join(' · ');
     notify(data.allowed?'Risk plan passed configured limits.':'Risk plan blocked by guardrails.');

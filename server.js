@@ -15,6 +15,12 @@ const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+// GOLD-3Po is a gold-only workspace: broker XAUUSD (incl. suffix variants like XAUUSD./XAUUSD-ECN)
+// and COMEX GC futures (GC, GCZ6, …). Everything else is rejected at the ingest boundary.
+const isGoldSymbol = (source, symbol) => source === 'comex'
+  ? /^GC[A-Z0-9]*$/i.test(symbol)
+  : /^XAUUSD(?:[.\-_][A-Z0-9]*)?$/i.test(symbol) || /^GOLD$/i.test(symbol);
+const goldOnly = (source, symbol) => { if (!isGoldSymbol(source, symbol)) throw Object.assign(new Error('GOLD-3Po is gold-only: accepted symbols are XAUUSD (MT5) and GC futures (COMEX).'), { status: 422 }); };
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -37,10 +43,12 @@ function eventFingerprint(event) {
 }
 function normalizeMt5(input) {
   if (input?.source !== 'mt5' || typeof input.symbol !== 'string' || !input.symbol.trim() || !validTimestamp(input.timestamp) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || !positive(input.bid) || !positive(input.ask) || input.ask < input.bid || !positive(input.last) || !Number.isFinite(input.tickVolume) || input.tickVolume < 0 || !Number.isFinite(input.realVolume) || input.realVolume < 0) throw Object.assign(new Error('Invalid MT5 tick. Required: source, symbol, ISO timestamp, positive sequence, bid, ask, last, tickVolume and realVolume.'), { status: 422 });
+  goldOnly('mt5', input.symbol.trim().toUpperCase());
   return { type: 'quote', source: 'mt5', venue: 'broker_otc', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, eventId: typeof input.eventId === 'string' && input.eventId.length <= 160 ? input.eventId : '', bid: input.bid, ask: input.ask, last: input.last, tickVolume: input.tickVolume, realVolume: input.realVolume, aggressorSide: ['buy','sell'].includes(input.aggressorSide) ? input.aggressorSide : (Number.isInteger(input.flags) && (input.flags & 32) ? 'buy' : Number.isInteger(input.flags) && (input.flags & 64) ? 'sell' : 'unknown'), flags: Number.isInteger(input.flags) ? input.flags : 0, volumeKind: 'broker_tick_or_reported_volume' };
 }
 function normalizeComex(input) {
   if (input?.source !== 'comex' || typeof input.symbol !== 'string' || !input.symbol.trim() || !validTimestamp(input.timestamp) || !Number.isSafeInteger(input.sequence) || input.sequence < 1 || typeof input.tradeId !== 'string' || !input.tradeId.trim() || !positive(input.price) || !positive(input.size) || !['buy','sell','unknown'].includes(input.aggressorSide)) throw Object.assign(new Error('Invalid COMEX trade. Required: source, symbol, ISO timestamp, positive sequence, tradeId, price, size and aggressorSide.'), { status: 422 });
+  goldOnly('comex', input.symbol.trim().toUpperCase());
   return { type: 'trade', source: 'comex', venue: 'comex_futures', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, eventId: 'COMEX-' + input.tradeId.trim(), tradeId: input.tradeId.trim(), price: input.price, size: input.size, aggressorSide: input.aggressorSide, volumeKind: 'exchange_trade_size' };
 }
 
@@ -115,6 +123,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
       return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
     }
@@ -127,6 +136,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if ((from && !Number.isFinite(fromMs)) || (to && !Number.isFinite(toMs)) || fromMs > toMs) return json(res, 400, { error: 'invalid_replay_range' });
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
       return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 }) });
     }
@@ -136,6 +146,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 });
       const options = {
@@ -157,6 +168,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000 });
       const signals = generateSignals(analysis.bars);
