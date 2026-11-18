@@ -49,7 +49,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   const storageReady = dataFile ? (async () => {
     try {
       const raw = await readFile(dataFile, 'utf8');
-      for (const line of raw.split('\\n')) {
+      for (const line of raw.split('\n')) {
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
@@ -173,7 +173,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           if (events.length > MAX_EVENTS) events.shift();
           const existing = feeds.get(key);
           feeds.set(key,{source:'mt5',symbol:stored.symbol,lastSequence:stored.sequence,receivedAt:Date.parse(stored.receivedAt),accepted:(existing?.accepted||0)+1});
-          const packet = `event: market\\ndata: ${JSON.stringify(stored)}\\n\\n`;
+          const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
           for (const client of clients) client.write(packet);
         }
         if (additions.length) lastSequence.set(key, sequenceCursor);
@@ -201,7 +201,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
             if(events.length>MAX_EVENTS) events.shift();
             const existing = feeds.get(key);
             feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:existing?.lastSequence||0,receivedAt,accepted:(existing?.accepted||0)+1});
-            const packet = `event: market\\ndata: ${JSON.stringify(stored)}\\n\\n`;
+            const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
             for (const client of clients) client.write(packet);
             accepted++;
           } catch { rejected++; }
