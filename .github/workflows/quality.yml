@@ -22,3 +22,26 @@ jobs:
           name: market-lab-browser-screenshots
           path: artifacts/
           if-no-files-found: ignore
+      - name: Package test release
+        if: success()
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          NAME="GOLD-3Po-v${VERSION}-test"
+          mkdir -p release
+          git archive --format=zip --prefix="${NAME}/" HEAD -o "release/${NAME}.zip"
+          sha256sum "release/${NAME}.zip" > "release/${NAME}.zip.sha256"
+          cat > "release/BUILD-INFO.txt" <<EOF
+          GOLD-3Po test release
+          Version: ${VERSION}
+          Commit: ${GITHUB_SHA}
+          Branch: ${GITHUB_REF_NAME}
+          Built by GitHub Actions after passing unit, syntax and Chromium UI checks.
+          EOF
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: GOLD-3Po-v0.2.0-test-release
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
