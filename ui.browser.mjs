@@ -85,6 +85,8 @@ try {
   await page.locator('#playReplay').click();
   await page.waitForTimeout(250);
   await page.locator('#pauseReplay').click();
+  await page.locator('#liveView').click();
+  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
   await page.locator('#runBacktest').click();
   await page.waitForFunction(() => document.querySelector('#backtestSummary')?.textContent.includes('trades'), null, { timeout:5000 });
   await page.locator('#calculateRisk').click();
