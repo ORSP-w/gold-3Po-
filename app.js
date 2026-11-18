@@ -1,7 +1,7 @@
 import { DEMO_BARS as FIXTURE_BARS, DEMO_ZONES as FIXTURE_ZONES, PRICE_LEVELS as FIXTURE_LEVELS, barDelta, totalVolume, imbalanceRatio, allocateVolume, validateMarketFixtures } from './market-data.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast');
-let bars=FIXTURE_BARS.slice(), zones=FIXTURE_ZONES.slice(), selected=bars.length-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, toastTimer;
+let bars=FIXTURE_BARS.slice(), zones=FIXTURE_ZONES.slice(), selected=bars.length-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
 let levels=FIXTURE_LEVELS.slice(), analysisMeta=null, hasAutoScrolled=false;
 const errors=validateMarketFixtures(FIXTURE_BARS,FIXTURE_ZONES,FIXTURE_LEVELS); if(errors.length) throw Error(errors.join('; '));
 const fmt=(v,d=2)=>Number(v).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
@@ -33,7 +33,17 @@ function select(i){if(!Number.isInteger(i)||i<0||i>=bars.length)return;selected=
 $('#zonesToggle').addEventListener('click',e=>{showZones=!showZones;e.currentTarget.setAttribute('aria-pressed',String(showZones));e.currentTarget.classList.toggle('is-off',!showZones);renderChart();notify(showZones?'Liquidity zones visible':'Liquidity zones hidden');});
 $('#numbersToggle').addEventListener('click',e=>{showNumbers=!showNumbers;e.currentTarget.setAttribute('aria-pressed',String(showNumbers));renderFootprint();});
 $('#footprintModes').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;$('#footprintModes').querySelectorAll('button').forEach(x=>x.classList.toggle('selected',x===b));renderFootprint();}));
-$('#resetView').addEventListener('click',()=>{showZones=true;showNumbers=true;mode='bidask';selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);notify('Workspace reset');});
+$('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);notify('Workspace reset');});
 $('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');notify($('#workspace').classList.contains('focus-chart')?'Chart focus enabled':'Full workspace restored');});
-window.addEventListener('market-analysis',e=>{const a=e.detail;if(!a?.bars?.length)return;const previousTime=bars[selected]?.time,wasAtLatest=selected===bars.length-1;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=wasAtLatest?bars.length-1:Math.max(0,bars.findIndex(b=>b.time===previousTime));levels=currentLevels();const status=$('#chartStatus');if(status){status.textContent='LIVE · '+bars.length+' BARS';status.className='ok';}const signalSummary=$('#signalSummary');if(signalSummary){const sweeps=bars.reduce((n,b)=>n+(b.sweeps?.length||0),0),stacked=bars.reduce((n,b)=>n+(b.stackedImbalances?.length||0),0),absorption=bars.filter(b=>b.absorption).length,exhaustion=bars.filter(b=>b.exhaustion).length;signalSummary.textContent='SWEEPS '+sweeps+' · STACKED '+stacked+' · ABSORPTION '+absorption+' · EXHAUSTION '+exhaustion;}const tag=$('#dataMode');if(tag)tag.textContent='ROBOFOREX MT5 · LIVE';const range=$('#barCount');if(range)range.textContent=bars.length+' BARS';renderZones();select(selected);});
+window.addEventListener('market-analysis',e=>{if(replayMode)return;const a=e.detail;if(!a?.bars?.length)return;const previousTime=bars[selected]?.time,wasAtLatest=selected===bars.length-1;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=wasAtLatest?bars.length-1:Math.max(0,bars.findIndex(b=>b.time===previousTime));levels=currentLevels();const status=$('#chartStatus');if(status){status.textContent='LIVE · '+bars.length+' BARS';status.className='ok';}const signalSummary=$('#signalSummary');if(signalSummary){const sweeps=bars.reduce((n,b)=>n+(b.sweeps?.length||0),0),stacked=bars.reduce((n,b)=>n+(b.stackedImbalances?.length||0),0),absorption=bars.filter(b=>b.absorption).length,exhaustion=bars.filter(b=>b.exhaustion).length;signalSummary.textContent='SWEEPS '+sweeps+' · STACKED '+stacked+' · ABSORPTION '+absorption+' · EXHAUSTION '+exhaustion;}const tag=$('#dataMode');if(tag)tag.textContent='ROBOFOREX MT5 · LIVE';const range=$('#barCount');if(range)range.textContent=bars.length+' BARS';renderZones();select(selected);});
+window.addEventListener('market-replay',e=>{
+ const a=e.detail;if(!a?.bars?.length)return;
+ replayMode=true;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=0;levels=currentLevels();hasAutoScrolled=false;
+ const status=$('#chartStatus');if(status){status.textContent='REPLAY · '+bars.length+' BARS';status.className='ok';}
+ const tag=$('#dataMode');if(tag)tag.textContent='HISTORICAL REPLAY';
+ const count=$('#barCount');if(count)count.textContent=bars.length+' REPLAY BARS';
+ const summary=$('#signalSummary');if(summary)summary.textContent='REPLAY · '+(a.eventCount||0)+' BROKER TICKS';
+ renderZones();select(0);
+});
+window.addEventListener('market-replay-step',e=>{if(replayMode)select(Number(e.detail?.index));});
 renderZones();select(selected);
