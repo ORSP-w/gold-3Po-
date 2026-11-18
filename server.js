@@ -56,11 +56,14 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           events.push(event);
           const eventId = event.eventId || eventFingerprint(event);
           seenEventIds.add(eventId);
+          seenEventIds.add(eventFingerprint(event));
           const key = event.source + ':' + event.symbol;
-          if (!event.historical) lastSequence.set(key, Math.max(lastSequence.get(key) || 0, event.sequence || 0));
-          const receivedAt = Date.parse(event.receivedAt) || Date.now();
-          const existing = feeds.get(key);
-          feeds.set(key, { source:event.source, symbol:event.symbol, lastSequence:!event.historical ? event.sequence : (existing?.lastSequence || 0), receivedAt, accepted:(existing?.accepted || 0)+1 });
+          if (!event.historical) {
+            lastSequence.set(key, Math.max(lastSequence.get(key) || 0, event.sequence || 0));
+            const receivedAt = Date.parse(event.receivedAt) || Date.now();
+            const existing = feeds.get(key);
+            feeds.set(key, { source:event.source, symbol:event.symbol, lastSequence:event.sequence, receivedAt, accepted:(existing?.accepted || 0)+1 });
+          }
         } catch {}
       }
       if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
@@ -161,7 +164,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         for (const raw of body.ticks) {
           const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol });
           const eventId = event.eventId || eventFingerprint(event);
-          if (seenEventIds.has(eventId)) { duplicates++; continue; }
+          const legacyId = eventFingerprint(event);
+          if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) { duplicates++; continue; }
           if (event.sequence <= sequenceCursor) return json(res, 409, { error:'sequence_not_increasing', lastAcceptedSequence:sequenceCursor });
           sequenceCursor = event.sequence;
           additions.push({ ...event, eventId, receivedAt:new Date(now()).toISOString() });
@@ -169,6 +173,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         await persistMany(additions);
         for (const stored of additions) {
           seenEventIds.add(stored.eventId);
+          seenEventIds.add(eventFingerprint(stored));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
           const existing = feeds.get(key);
@@ -187,24 +192,26 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         const body = await readJson(req);
         if (body?.source !== 'mt5' || !Array.isArray(body.ticks) || body.ticks.length < 1 || body.ticks.length > 1000) return json(res, 422, { error: 'invalid_history_batch', message: 'Expected 1..1000 MT5 ticks.' });
         let accepted = 0; let duplicates = 0; let rejected = 0;
+        const additions = [];
         for (const raw of body.ticks) {
           try {
             const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol || raw.symbol });
             const eventId = event.eventId || eventFingerprint(event);
-            if (seenEventIds.has(eventId)) { duplicates++; continue; }
-            const key = event.source + ':' + event.symbol;
-            const receivedAt = now();
-            const stored = { ...event, eventId, receivedAt:new Date(receivedAt).toISOString(), historical:true };
-            await persist(stored);
-            seenEventIds.add(eventId);
-            events.push(stored);
-            if(events.length>MAX_EVENTS) events.shift();
-            const existing = feeds.get(key);
-            feeds.set(key,{source:event.source,symbol:event.symbol,lastSequence:existing?.lastSequence||0,receivedAt,accepted:(existing?.accepted||0)+1});
-            const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
-            for (const client of clients) client.write(packet);
-            accepted++;
+            const legacyId = eventFingerprint(event);
+            if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) { duplicates++; continue; }
+            const stored = { ...event, eventId, receivedAt:new Date(now()).toISOString(), historical:true };
+            additions.push(stored);
           } catch { rejected++; }
+        }
+        await persistMany(additions);
+        for (const stored of additions) {
+          seenEventIds.add(stored.eventId);
+          seenEventIds.add(eventFingerprint(stored));
+          events.push(stored);
+          if (events.length > MAX_EVENTS) events.shift();
+          const packet = `event: market\\ndata: ${JSON.stringify(stored)}\\n\\n`;
+          for (const client of clients) client.write(packet);
+          accepted++;
         }
         return json(res,202,{accepted,duplicates,rejected,total:body.ticks.length});
       } catch(error) { return json(res,error.status||400,{error:'invalid_request',message:error.message}); }
@@ -217,7 +224,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     try {
       const event = normalize(await readJson(req));
       const eventId = event.eventId || eventFingerprint(event);
-      if (seenEventIds.has(eventId)) return json(res, 409, { error: 'duplicate_event', eventId });
+      const legacyId = eventFingerprint(event);
+      if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) return json(res, 409, { error: 'duplicate_event', eventId });
       const key = event.source + ':' + event.symbol;
       const previous = lastSequence.get(key) || 0;
       if (event.sequence <= previous) return json(res, 409, { error: 'sequence_not_increasing', lastAcceptedSequence: previous });
@@ -225,6 +233,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const stored = { ...event, eventId, receivedAt: new Date(receivedAt).toISOString() };
       await persist(stored);
       seenEventIds.add(eventId);
+      seenEventIds.add(legacyId);
       lastSequence.set(key, event.sequence);
       events.push(stored);
       if (events.length > MAX_EVENTS) events.shift();
