@@ -57,3 +57,14 @@ test('liquidity detector groups repeated swing highs into buy-side pools',()=>{
  assert.ok(zones.some(z=>z.side==='buy'));
  assert.ok(zones.some(z=>z.side==='buy'&&z.high>12&&z.low<12.1));
 });
+
+test('licensed COMEX trades contribute reported exchange size and aggressor side',()=>{
+ const out=buildMarketAnalysis([
+  {type:'trade',source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T10:01:00.000Z',price:2650,size:4,aggressorSide:'buy'},
+  {type:'trade',source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T10:02:00.000Z',price:2650,size:2,aggressorSide:'sell'}
+ ]);
+ assert.equal(out.bars[0].ask,4);
+ assert.equal(out.bars[0].bid,2);
+ assert.equal(out.bars[0].volume,6);
+ assert.equal(out.volumeKind,'exchange_trade_size');
+});
