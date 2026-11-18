@@ -46,4 +46,5 @@ window.addEventListener('market-replay',e=>{
  renderZones();select(0);
 });
 window.addEventListener('market-replay-step',e=>{if(replayMode)select(Number(e.detail?.index));});
+window.addEventListener('exit-replay',()=>{replayMode=false;});
 renderZones();select(selected);
