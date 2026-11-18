@@ -53,7 +53,7 @@ bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong 
       MqlTick tick = ticks[first+i];
       historySequence++;
       double lastPrice = tick.last > 0 ? tick.last : (tick.bid + tick.ask) / 2.0;
-      string eventId = StringFormat("%s-%I64d-%I64u", _Symbol, tick.time_msc, historySequence);
+      string eventId = StringFormat("%s-%I64d-%.10f-%.10f-%.10f-%I64u-%.4f-%u", _Symbol, tick.time_msc, tick.bid, tick.ask, lastPrice, tick.volume, tick.volume_real, tick.flags);
       if(i > 0) body += ",";
       body += StringFormat(
          "{\"timestamp\":\"%s\",\"sequence\":%I64u,\"eventId\":\"%s\",\"bid\":%.10f,\"ask\":%.10f,\"last\":%.10f,\"tickVolume\":%I64u,\"realVolume\":%.4f,\"flags\":%u}",
