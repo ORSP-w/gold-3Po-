@@ -109,7 +109,7 @@ function createMainWindow() {
     minHeight: 720,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#090b13',
+    backgroundColor: '#101010',
     title: 'GOLD-3Po Market Lab',
     webPreferences: {
       contextIsolation: true,
