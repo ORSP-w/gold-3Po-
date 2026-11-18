@@ -16,5 +16,7 @@ test('risk guard blocks excess risk and poor reward-to-risk',()=>{
  assert.equal(plan.checks.every(x=>x.passed),false);
 });
 test('risk planner rejects invalid geometry',()=>{
- assert.throws(()=>calculateRiskPlan({equity:10000,riskPct:1,entry:2650,stop:2640,target:2645,pointValue:1}),/positive finite/);
+ const plan=calculateRiskPlan({equity:10000,riskPct:1,entry:2650,stop:2640,target:2645,pointValue:1});
+ assert.equal(plan.allowed,false);
+ assert.equal(plan.direction,null);
 });
