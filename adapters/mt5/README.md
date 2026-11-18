@@ -13,9 +13,9 @@ The Expert Advisor (EA) runs inside the user's logged-in MetaTrader 5 terminal. 
 
 ## Data flow and recovery
 
-- At startup the EA requests up to 90 days (30 by default) of broker tick history using hourly `CopyTicksRange` windows and uploads batches of up to 1,000 ticks.
+- At startup the EA schedules up to 90 days (30 by default) of broker tick history using hourly `CopyTicksRange` windows. Backfill runs asynchronously from the MT5 timer, one batch of up to 1,000 ticks per cycle, so the terminal becomes responsive immediately and live events are sent first.
 - Each historical tick has a deterministic event identity. The API stores historical events independently from the live sequence counter and de-duplicates repeated history uploads. Restarting the EA therefore does not cause historical sequence numbers to block live quotes.
-- If one or more history requests fail, the EA retries the history sync every `HistoryRetryMinutes` (15 by default), while live collection continues.
+- If a history request or upload fails, the EA retains the current batch and retries with exponential backoff; after repeated failures it waits `HistoryRetryMinutes` (15 by default). Live collection and delivery have priority over backfill.
 - Live events are captured in `OnTick`, assigned atomically reserved per-symbol sequence numbers and buffered in memory. The timer flushes batches of up to 1,000 ticks to `/v1/ingest/mt5/live-batch`. Failed batches stay queued for retry. The buffer is capped at 20,000 ticks; a longer outage can overflow it and the EA logs that condition.
 - The terminal must remain open and connected. MT5 WebRequest is synchronous; a slow API can delay the EA's event processing. Use a nearby API host and TLS for remote connections.
 - API events are appended to `./data/market-events.jsonl` by default and reloaded after API restart. Set `MARKET_DATA_FILE` to change the path.
