@@ -77,6 +77,20 @@ try {
   assert.match(await page.locator('#selectedBar').innerText(), /#001/);
   assert.ok(await page.locator('.foot-cell[data-index="0"]').count() > 0, 'footprint window should follow a selected historical candle');
 
+  await page.locator('#loadReplay').click();
+  await page.waitForFunction(() => document.querySelector('#replaySlider') && !document.querySelector('#replaySlider').disabled, null, { timeout:5000 });
+  assert.ok(await page.locator('.candle').count() >= 30, 'replay must load the selected historical range');
+  await page.locator('#replaySlider').evaluate(el=>{el.value='1';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  assert.match(await page.locator('#selectedBar').innerText(), /#002/, 'replay slider must move the selected candle and footprint');
+  await page.locator('#playReplay').click();
+  await page.waitForTimeout(250);
+  await page.locator('#pauseReplay').click();
+  await page.locator('#runBacktest').click();
+  await page.waitForFunction(() => document.querySelector('#backtestSummary')?.textContent.includes('trades'), null, { timeout:5000 });
+  await page.locator('#calculateRisk').click();
+  await page.waitForFunction(() => document.querySelector('#riskResult')?.textContent.includes('PLAN PASSES GUARDRAILS'), null, { timeout:5000 });
+  assert.match(await page.locator('#riskChecks').innerText(), /PASS/);
+
   await mkdir('artifacts', { recursive:true });
   await page.screenshot({ path:'artifacts/market-lab-desktop.png', fullPage:true });
   await page.setViewportSize({ width:390, height:844 });
@@ -86,7 +100,7 @@ try {
   assert.ok(mobile.chart > 0 && mobile.footprint > 0, 'chart and footprint must remain visible on mobile');
   await page.screenshot({ path:'artifacts/market-lab-mobile.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
-  process.stdout.write('Browser checks passed: chart, footprint, zone selection, toggles, inspector, reset, layout, live MT5/COMEX status and mobile overflow.\n');
+  process.stdout.write('Browser checks passed: chart, footprint, zones, replay, backtest, risk planner, live MT5/COMEX status and mobile overflow.\n');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');
