@@ -2,13 +2,14 @@
   "name": "gold-3po-market-lab",
   "version": "0.3.0",
   "private": true,
+  "author": "GOLD-3Po",
   "type": "module",
   "main": "electron/main.js",
   "description": "GOLD-3Po Market Lab desktop application",
   "scripts": {
     "start": "node --env-file=.env server.js",
     "start:desktop": "electron .",
-    "dist:win": "electron-builder --win nsis --x64",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
     "test": "node --test",
     "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-client.js && node --check research-client.js && node --check market-engine.js && node --check strategy-engine.js && node --check backtest-engine.js && node --check risk-engine.js && node --check ui.browser.mjs && node --check electron/main.js",
     "serve": "python3 -m http.server 4173"
