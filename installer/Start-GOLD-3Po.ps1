@@ -70,7 +70,7 @@ try {
         }
     }
 
-    Start-Process $url
+    if (-not $NoBrowser) { Start-Process $url }
 } catch {
     $message = $_.Exception.Message
     try {
