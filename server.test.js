@@ -68,3 +68,17 @@ test('risk endpoint enforces sizing and reward-risk guardrails',async()=>{
  const blocked=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=2&entry=2650&stop=2645&target=2652&pointValue=1')).json();
  assert.equal(ok.allowed,true);assert.equal(ok.quantity,10);assert.equal(blocked.allowed,false);
 });
+
+test('live MT5 batch preserves sequence order and safely retries an already ingested payload',async()=>{
+ const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T17:0'+sequence+':00.000Z',sequence:100+sequence,eventId:'LIVE-'+(100+sequence),bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
+ const send=()=>fetch(base+'/v1/ingest/mt5/live-batch',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+ const first=await (await send()).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);assert.equal(first.lastAcceptedSequence,102);
+ const retry=await (await send()).json();assert.equal(retry.accepted,0);assert.equal(retry.duplicates,2);
+});
+test('COMEX events can be analysed as actual exchange trades, not broker quotes',async()=>{
+ const event={source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T18:00:00.000Z',sequence:1,tradeId:'gc-trade-1',price:2650.1,size:3,aggressorSide:'buy'};
+ const ingest=await fetch(base+'/v1/ingest/comex/trade',{method:'POST',headers:auth,body:JSON.stringify(event)});
+ assert.equal(ingest.status,202);
+ const response=await fetch(base+'/v1/market/analysis?source=comex&symbol=GCZ6&intervalMs=900000');
+ const analysis=await response.json();assert.equal(response.status,200);assert.equal(analysis.source,'comex');assert.equal(analysis.bars[0].volume,3);assert.equal(analysis.volumeKind,'exchange_trade_size');
+});
