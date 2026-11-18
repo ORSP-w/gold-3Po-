@@ -98,8 +98,8 @@ $('saveSetup')?.addEventListener('click', async () => {
   if (!name) { say('Enter a setup name first.'); return; }
   try {
     const result = await postJson('/v1/setups', { name, definition: collectDefinition() });
-    say(result.deduplicated ? 'Identical conditions already saved as ' + name + ' v' + result.version + '.' : 'Saved ' + name + ' v' + result.version + ' (' + result.fingerprint.slice(0, 8) + '). Press Apply to use it.');
     await loadLibrary();
+    say(result.deduplicated ? 'Identical conditions already saved as ' + name + ' v' + result.version + '.' : 'Saved ' + name + ' v' + result.version + ' (' + result.fingerprint.slice(0, 8) + '). Press Apply to use it.');
     announceChange();
   } catch (error) { say('Save failed: ' + error.message); }
 });
@@ -144,8 +144,8 @@ $('importSetupFile')?.addEventListener('change', async event => {
     const definition = parsed.definition || parsed;
     const name = parsed.name || file.name.replace(/\.json$/i, '');
     const result = await postJson('/v1/setups/import', { name, definition });
-    say('Imported as a new setup identity (v' + result.version + '). Apply it explicitly when ready.');
     await loadLibrary();
+    say('Imported as a new setup identity (v' + result.version + '). Apply it explicitly when ready.');
     announceChange();
   } catch (error) { say('Import rejected: ' + error.message); }
   event.target.value = '';

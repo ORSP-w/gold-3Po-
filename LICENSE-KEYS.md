@@ -56,6 +56,14 @@ and also compares the system clock against **market feed time** (MT5/COMEX event
 timestamps). Rolling the Windows clock back more than 5 minutes below either reference
 invalidates the licence with `clock_rollback` until the correct time is restored.
 
+## Development / CI mode
+
+Setting `LICENSE_REQUIRED=0` in the server environment disables the gate
+(`status.required=false`, reason `disabled`). This exists so automated UI tests
+and local development can run without issuing keys. The shipped installer and
+the Electron app never set it. Treat it like any source-level bypass: it is a
+development convenience, not a security boundary.
+
 ## Honest limits
 
 - The watermark file is local and best effort: deleting `data/license-state.json` resets

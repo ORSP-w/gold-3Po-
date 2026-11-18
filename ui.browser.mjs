@@ -7,7 +7,8 @@ const port = 8787;
 const base = 'http://127.0.0.1:' + port;
 const token = 'browser-test-token-which-is-long-enough';
 const isolatedDataFile = '/tmp/gold-3po-browser-' + process.pid + '.jsonl';
-const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), MARKET_INGEST_TOKEN: token, MARKET_DATA_FILE: isolatedDataFile }, stdio: 'ignore' });
+const isolatedSetupsFile = '/tmp/gold-3po-browser-setups-' + process.pid + '.json';
+const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), MARKET_INGEST_TOKEN: token, MARKET_DATA_FILE: isolatedDataFile, SETUPS_FILE: isolatedSetupsFile, LICENSE_REQUIRED: '0' }, stdio: 'ignore' });
 let browser;
 try {
   let ready = false;
@@ -94,6 +95,19 @@ try {
   await page.waitForFunction(() => document.querySelector('#riskResult')?.textContent.includes('PLAN PASSES GUARDRAILS'), null, { timeout:5000 });
   assert.match(await page.locator('#riskChecks').innerText(), /PASS/);
 
+  // Vespera-style setup library: save, apply and verify the active conditions propagate.
+  await page.locator('#setupName').fill('Browser strict');
+  await page.locator('#condStacked').check();
+  await page.locator('#saveSetup').click();
+  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Saved Browser strict'), null, { timeout:5000 });
+  await page.locator('#setupSelect').selectOption({ index: 1 });
+  await page.locator('#applySetup').click();
+  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Applied'), null, { timeout:5000 });
+  const setupsState = await (await fetch(base + '/v1/setups')).json();
+  assert.ok(setupsState.activeId, 'a setup must be active after Apply');
+  assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
+  assert.match(await page.locator('#licenseStatus').innerText(), /NOT REQUIRED/, 'licence row must reflect the CI dev mode');
+
   await mkdir('artifacts', { recursive:true });
   await page.screenshot({ path:'artifacts/market-lab-desktop.png', fullPage:true });
   await page.setViewportSize({ width:390, height:844 });
@@ -103,9 +117,10 @@ try {
   assert.ok(mobile.chart > 0 && mobile.footprint > 0, 'chart and footprint must remain visible on mobile');
   await page.screenshot({ path:'artifacts/market-lab-mobile.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
-  process.stdout.write('Browser checks passed: chart, footprint, zones, replay, backtest, risk planner, live MT5/COMEX status and mobile overflow.\n');
+  process.stdout.write('Browser checks passed: chart, footprint, zones, replay, backtest, risk planner, setup library, live MT5/COMEX status and mobile overflow.\n');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');
   await rm(isolatedDataFile,{force:true});
+  await rm(isolatedSetupsFile,{force:true});
 }
