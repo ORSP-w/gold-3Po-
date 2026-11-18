@@ -25,6 +25,20 @@ function stopReplay() {
   if ($('playReplay')) $('playReplay').disabled = replayBars.length === 0;
   if ($('pauseReplay')) $('pauseReplay').disabled = true;
 }
+async function exitReplay() {
+  stopReplay();
+  replayBars = [];
+  $('replaySlider').disabled = true;
+  $('liveView').disabled = true;
+  $('replayPosition').textContent = 'Live market view';
+  window.dispatchEvent(new CustomEvent('exit-replay'));
+  try {
+    const response = await fetch('/v1/market/analysis?symbol=XAUUSD&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
+    const data = await response.json();
+    if (response.ok && data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
+    notify('Returned to current broker feed.');
+  } catch(error) { notify('Could not refresh live data: '+error.message); }
+}
 function selectReplay(index) {
   if (!replayBars.length) return;
   const safe = Math.max(0,Math.min(replayBars.length-1,Number(index)||0));
@@ -58,6 +72,7 @@ async function loadReplay() {
     $('replaySlider').disabled=false;
     $('playReplay').disabled=false;
     $('pauseReplay').disabled=true;
+    $('liveView').disabled=false;
     window.dispatchEvent(new CustomEvent('market-replay',{detail:data}));
     selectReplay(0);
     notify(`Replay ready: ${replayBars.length} bars from ${data.eventCount} ticks`);
@@ -136,6 +151,7 @@ async function refreshSignals() {
 $('loadReplay')?.addEventListener('click',loadReplay);
 $('playReplay')?.addEventListener('click',playReplay);
 $('pauseReplay')?.addEventListener('click',stopReplay);
+$('liveView')?.addEventListener('click',exitReplay);
 $('replaySlider')?.addEventListener('input',event=>{stopReplay();selectReplay(event.target.value);});
 $('runBacktest')?.addEventListener('click',runBacktest);
 $('calculateRisk')?.addEventListener('click',calculateRisk);
