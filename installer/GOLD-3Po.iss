@@ -44,4 +44,4 @@ Name: "{autodesktop}\GOLD-3Po Market Lab"; Filename: "{app}\Launch-GOLD-3Po.vbs"
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\Launch-GOLD-3Po.vbs"""; Description: "Запустить GOLD-3Po"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
-Filename: "{sys}\wscript.exe"; Parameters: """{app}\Stop-GOLD-3Po.vbs"""; Flags: runhidden
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\Stop-GOLD-3Po.vbs"""; Flags: runhidden; RunOnceId: StopGOLD3Po
