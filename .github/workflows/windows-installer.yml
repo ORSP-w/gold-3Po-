@@ -143,6 +143,69 @@ jobs:
             "Install mode: per-user; administrator rights are not required"
           ) | Set-Content -LiteralPath "release\BUILD-INFO.txt" -Encoding utf8
 
+      - name: Smoke-test Windows installer and local app startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Installer EXE is missing for smoke test." }
+
+          $installDir = Join-Path $env:RUNNER_TEMP "GOLD-3Po-smoke"
+          $installLog = Join-Path $env:RUNNER_TEMP "GOLD-3Po-installer-smoke.log"
+          $startScript = Join-Path $installDir "Start-GOLD-3Po.ps1"
+          $stopScript = Join-Path $installDir "Stop-GOLD-3Po.ps1"
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          $baseUrl = "http://127.0.0.1:8787"
+          $installed = $false
+
+          try {
+            Write-Host "Launching installer silently: $($installer.Name)"
+            & $installer.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/DIR=$installDir" "/LOG=$installLog"
+            if ($LASTEXITCODE -ne 0) { throw "Installer process returned exit code $LASTEXITCODE. Log: $installLog" }
+            $installed = $true
+
+            foreach ($required in @(
+              (Join-Path $installDir "runtime\node.exe"),
+              (Join-Path $installDir "server.js"),
+              $startScript,
+              $stopScript,
+              (Join-Path $installDir "assets\GOLD-3Po.ico")
+            )) {
+              if (-not (Test-Path -LiteralPath $required)) { throw "Installed file is missing: $required" }
+            }
+
+            Write-Host "Starting installed application using the bundled Node.js runtime..."
+            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $startScript -NoBrowser
+            if ($LASTEXITCODE -ne 0) { throw "Application launcher exited with code $LASTEXITCODE" }
+
+            $healthy = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              Start-Sleep -Milliseconds 500
+              try {
+                $health = Invoke-RestMethod -Uri "$baseUrl/health" -TimeoutSec 2
+                if ($health.status -eq "ok" -and $health.ingestConfigured -eq $true) {
+                  $healthy = $true
+                  break
+                }
+              } catch {}
+            }
+            if (-not $healthy) { throw "Installed application failed the HTTP /health test. Inspect logs in $installDir\logs and installer log $installLog" }
+
+            $page = Invoke-WebRequest -Uri $baseUrl -UseBasicParsing -TimeoutSec 5
+            if ($page.StatusCode -ne 200 -or $page.Content -notmatch "GOLD-3Po|Market Lab") {
+              throw "Installed application root page did not return the expected HTML."
+            }
+
+            Write-Host "PASS: installer launches, files install, bundled Node.js starts, and HTTP health/root checks pass."
+          } finally {
+            if (Test-Path -LiteralPath $stopScript) {
+              & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $stopScript
+            }
+            if (Test-Path -LiteralPath $uninstaller) {
+              & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+            }
+          }
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
