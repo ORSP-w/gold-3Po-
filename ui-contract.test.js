@@ -11,3 +11,13 @@ test('chart and footprint targets exist before the module initializes',()=>{for(
 test('liquidity zone rows are wired to selection and workspace reset clears selection',()=>{assert.ok(app.includes('selectedZone=selectedZone===n.dataset.zone?null:n.dataset.zone'));assert.ok(app.includes('renderZones();renderChart();'));assert.match(app,/selectedZone=null/);});
 
 test('live feed status client uses same-origin health and SSE endpoints',async()=>{const client=await readFile(new URL('./market-client.js',import.meta.url),'utf8');assert.match(html,/id="apiStatus"/);assert.match(html,/id="mt5Status"/);assert.match(html,/id="comexStatus"/);assert.match(client,/fetch\('\/health'/);assert.match(client,/new EventSource\('\/v1\/stream'/);assert.match(client,/window\.setInterval\(refreshHealth, 5000\)/);});
+
+test('research controls are wired to replay, backtest, risk and alert actions',async()=>{
+ const client=await readFile(new URL('./research-client.js',import.meta.url),'utf8');
+ for(const id of ['replayFrom','replayTo','replaySlider','replayPosition','backtestSummary','riskResult','signalMonitor'])assert.ok(html.includes('id="'+id+'"'),'Missing research target '+id);
+ for(const id of ['loadReplay','playReplay','pauseReplay','replaySlider','runBacktest','calculateRisk','enableAlerts'])assert.ok(client.includes("$('"+id+"')?.addEventListener"),'Research control has no handler: '+id);
+ assert.match(client,/\/v1\/market\/replay/);
+ assert.match(client,/\/v1\/market\/backtest/);
+ assert.match(client,/\/v1\/risk\/plan/);
+ assert.match(client,/\/v1\/market\/signals/);
+});
