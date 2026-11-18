@@ -18,6 +18,14 @@ ulong pendingSequences[];
 bool queueLimitLogged = false;
 bool historySynchronized = false;
 ulong nextHistoryRetryAt = 0;
+MqlTick historyTicks[];
+int historyOffset = 0;
+ulong historySequence = 0;
+ulong historyTotalTicks = 0;
+datetime historyCursor = 0;
+datetime historyEnd = 0;
+datetime historyChunkEnd = 0;
+bool historyChunkLoaded = false;
 
 string TickStamp(const long timeMsc)
 {
@@ -64,45 +72,79 @@ bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong 
    return PostJson(HistoryUrl, body);
 }
 
-bool SyncHistory()
+void StartHistorySync()
 {
    int days = MathMax(1, MathMin(HistoryDays, 90));
+   historyEnd = TimeGMT();
+   historyCursor = historyEnd - days * 86400;
+   historySequence = 0;
+   historyTotalTicks = 0;
+   historyOffset = 0;
+   historyChunkLoaded = false;
+   ArrayFree(historyTicks);
+   historySynchronized = false;
+   Print("GOLD-3Po: scheduled up to ", days, " days of broker history. Live collection starts immediately.");
+}
+
+void ProcessHistorySync()
+{
+   if(historySynchronized) return;
    int batchSize = MathMax(10, MathMin(HistoryBatchSize, 1000));
-   bool complete = true;
-   ulong totalTicks = 0;
-   ulong historySequence = 0;
-   datetime endTime = TimeGMT();
-   datetime startTime = endTime - days * 86400;
-   Print("GOLD-3Po: requesting up to ", days, " days of broker ticks for ", _Symbol);
-   for(datetime cursor=startTime; cursor<endTime; cursor+=3600)
+
+   if(!historyChunkLoaded)
    {
-      datetime stop = (datetime)MathMin((long)endTime, (long)(cursor+3600));
-      MqlTick ticks[];
-      ulong fromMsc = (ulong)cursor * 1000;
-      ulong toMsc = (ulong)stop * 1000 - 1;
+      if(historyCursor >= historyEnd)
+      {
+         historySynchronized = true;
+         Print("GOLD-3Po: history sync completed. Ticks uploaded: ", historyTotalTicks, ". Repeated ticks are de-duplicated by the API.");
+         return;
+      }
+
+      historyChunkEnd = (datetime)MathMin((long)historyEnd, (long)(historyCursor + 3600));
+      MqlTick copiedTicks[];
+      ulong fromMsc = (ulong)historyCursor * 1000;
+      ulong toMsc = (ulong)historyChunkEnd * 1000 - 1;
       ResetLastError();
-      int copied = CopyTicksRange(_Symbol, ticks, COPY_TICKS_ALL, fromMsc, toMsc);
+      int copied = CopyTicksRange(_Symbol, copiedTicks, COPY_TICKS_ALL, fromMsc, toMsc);
       if(copied < 0)
       {
-         Print("GOLD-3Po: history chunk unavailable at ", TimeToString(cursor), " error=", GetLastError());
-         complete = false;
-         continue;
+         Print("GOLD-3Po: history chunk unavailable at ", TimeToString(historyCursor), " error=", GetLastError(), ". Retry scheduled.");
+         nextHistoryRetryAt = GetTickCount64() + 1000;
+         return;
       }
-      for(int offset=0; offset<copied; offset+=batchSize)
+
+      ArrayFree(historyTicks);
+      if(copied > 0)
       {
-         int count = MathMin(batchSize, copied-offset);
-         if(!SendHistoryBatch(ticks, offset, count, historySequence))
-         {
-            Print("GOLD-3Po: history upload interrupted; live feed will continue and history sync will retry.");
-            complete = false;
-            break;
-         }
-         totalTicks += (ulong)count;
+         ArrayResize(historyTicks, copied);
+         ArrayCopy(historyTicks, copiedTicks, 0, 0, copied);
       }
+      historyOffset = 0;
+      historyChunkLoaded = true;
    }
-   if(complete) Print("GOLD-3Po: history sync completed. Ticks uploaded: ", totalTicks, ". Repeated ticks are de-duplicated by the API.");
-   else Print("GOLD-3Po: history sync incomplete. Will retry after ", HistoryRetryMinutes, " minutes.");
-   return complete;
+
+   int total = ArraySize(historyTicks);
+   if(historyOffset < total)
+   {
+      int count = MathMin(batchSize, total - historyOffset);
+      if(!SendHistoryBatch(historyTicks, historyOffset, count, historySequence))
+      {
+         Print("GOLD-3Po: history upload failed; the same batch will be retried idempotently.");
+         nextHistoryRetryAt = GetTickCount64() + 1000;
+         return;
+      }
+      historyOffset += count;
+      historyTotalTicks += (ulong)count;
+   }
+
+   if(historyOffset >= total)
+   {
+      ArrayFree(historyTicks);
+      historyOffset = 0;
+      historyChunkLoaded = false;
+      historyCursor = historyChunkEnd;
+   }
+   nextHistoryRetryAt = GetTickCount64();
 }
 
 bool FlushLiveBatch()
@@ -196,10 +238,10 @@ int OnInit()
       return INIT_PARAMETERS_INCORRECT;
    }
    if(!SymbolSelect(_Symbol, true)) return INIT_FAILED;
-   historySynchronized = SyncHistory();
-   nextHistoryRetryAt = GetTickCount64() + (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
+   StartHistorySync();
+   nextHistoryRetryAt = GetTickCount64();
    EventSetMillisecondTimer(MathMax(100, MinIntervalMs));
-   Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes enabled.");
+   Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes and asynchronous history sync enabled.");
    return INIT_SUCCEEDED;
 }
 
@@ -208,11 +250,14 @@ void OnDeinit(const int reason) { EventKillTimer(); }
 void OnTimer()
 {
    ulong nowMs = GetTickCount64();
-   if(!historySynchronized && nowMs >= nextHistoryRetryAt)
+   if(ArraySize(pendingTicks) > 0)
    {
-      historySynchronized = SyncHistory();
-      nextHistoryRetryAt = nowMs + (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
+      if(!FlushLiveBatch())
+      {
+         Print("GOLD-3Po: pending live tick batch retained for retry. Check API/WebRequest connectivity.");
+         return;
+      }
    }
-   if(ArraySize(pendingTicks) > 0 && !FlushLiveBatch())
-      Print("GOLD-3Po: pending live tick batch retained for retry. Check API/WebRequest connectivity.");
+   if(!historySynchronized && nowMs >= nextHistoryRetryAt)
+      ProcessHistorySync();
 }
