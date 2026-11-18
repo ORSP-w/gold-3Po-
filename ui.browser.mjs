@@ -50,11 +50,11 @@ try {
   await page.locator('#numbersToggle').click();
 
   await page.locator('.foot-cell[data-index="3"]').first().click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#04/);
+  assert.match(await page.locator('#selectedBar').innerText(), /#004/);
   await page.locator('.candle[data-index="2"]').click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#03/);
+  assert.match(await page.locator('#selectedBar').innerText(), /#003/);
   await page.locator('#resetView').click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#12/);
+  assert.match(await page.locator('#selectedBar').innerText(), /#012/);
   assert.equal(await page.locator('.zone-row.selected').count(), 0, 'reset should clear zone selection');
 
   await page.locator('#layoutButton').click();
