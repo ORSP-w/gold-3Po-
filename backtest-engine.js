@@ -1,0 +1,87 @@
+import { averageTrueRange, generateSignals } from './strategy-engine.js';
+
+export function runBacktest(bars, options = {}) {
+  const {
+    initialEquity = 10000, riskPct = 0.5, maxRiskPct = 1,
+    atrPeriod = 14, stopAtr = 1.5, targetR = 2,
+    maxBars = 20, pointValue = 1, feePerUnit = 0, slippage = 0,
+    minScore = 0.55, maxTrades = 5000
+  } = options;
+  const numeric = [initialEquity, riskPct, maxRiskPct, stopAtr, targetR, pointValue, feePerUnit, slippage];
+  if (!Array.isArray(bars) || numeric.some(value => !Number.isFinite(value)) ||
+      initialEquity <= 0 || riskPct <= 0 || maxRiskPct <= 0 || riskPct > maxRiskPct ||
+      stopAtr <= 0 || targetR <= 0 || pointValue <= 0 || feePerUnit < 0 || slippage < 0 ||
+      !Number.isInteger(maxBars) || maxBars < 1 || !Number.isInteger(maxTrades) || maxTrades < 1) {
+    throw new TypeError('Invalid backtest configuration');
+  }
+  const signals = generateSignals(bars, { minScore, atrPeriod });
+  let equity = initialEquity, peak = initialEquity, maxDrawdown = 0, cursor = 0;
+  const trades = [];
+  while (cursor < signals.length && trades.length < maxTrades) {
+    const signal = signals[cursor++];
+    const entryIndex = signal.index + 1;
+    if (entryIndex >= bars.length) continue;
+    const atr = signal.atr || averageTrueRange(bars, signal.index, atrPeriod);
+    if (!Number.isFinite(atr) || atr <= 0) continue;
+    const stopDistance = atr * stopAtr;
+    const riskBudget = equity * riskPct / 100;
+    if (riskBudget <= 0) break;
+    const quantity = riskBudget / (stopDistance * pointValue);
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    const direction = signal.side === 'long' ? 1 : -1;
+    const rawEntry = bars[entryIndex].o;
+    const entry = rawEntry + direction * slippage;
+    const stop = entry - direction * stopDistance;
+    const target = entry + direction * stopDistance * targetR;
+    const lastIndex = Math.min(bars.length - 1, entryIndex + maxBars - 1);
+    let exitIndex = lastIndex, exit = bars[lastIndex].c, exitReason = 'time';
+    for (let i = entryIndex; i <= lastIndex; i++) {
+      const bar = bars[i];
+      const stopHit = direction === 1 ? bar.l <= stop : bar.h >= stop;
+      const targetHit = direction === 1 ? bar.h >= target : bar.l <= target;
+      if (stopHit) {
+        exitIndex = i;
+        exit = (direction === 1 && bar.o < stop) || (direction === -1 && bar.o > stop) ? bar.o : stop;
+        exitReason = 'stop';
+        break;
+      }
+      if (targetHit) { exitIndex = i; exit = target; exitReason = 'target'; break; }
+    }
+    exit -= direction * slippage;
+    const grossPnl = (exit - entry) * direction * quantity * pointValue;
+    const fees = quantity * feePerUnit * 2;
+    const netPnl = grossPnl - fees;
+    const netR = netPnl / riskBudget;
+    equity += netPnl;
+    peak = Math.max(peak, equity);
+    const drawdown = peak > 0 ? (peak - equity) / peak * 100 : 0;
+    maxDrawdown = Math.max(maxDrawdown, drawdown);
+    trades.push({
+      side: signal.side, signalIndex: signal.index, entryIndex, exitIndex,
+      entryTime: bars[entryIndex].time, exitTime: bars[exitIndex].time,
+      entry, exit, stop, target, quantity, riskBudget,
+      grossPnl, fees, netPnl, netR, exitReason,
+      technicalScore: signal.technicalScore
+    });
+    cursor = signals.findIndex((item, i) => i >= cursor && item.index > exitIndex);
+    if (cursor < 0) break;
+  }
+  const wins = trades.filter(trade => trade.netPnl > 0);
+  const losses = trades.filter(trade => trade.netPnl < 0);
+  const grossWins = wins.reduce((sum, trade) => sum + trade.netPnl, 0);
+  const grossLosses = Math.abs(losses.reduce((sum, trade) => sum + trade.netPnl, 0));
+  const netPnl = trades.reduce((sum, trade) => sum + trade.netPnl, 0);
+  return {
+    config: { initialEquity, riskPct, maxRiskPct, atrPeriod, stopAtr, targetR, maxBars, pointValue, feePerUnit, slippage, minScore },
+    summary: {
+      trades: trades.length, wins: wins.length, losses: losses.length,
+      winRate: trades.length ? wins.length / trades.length : null,
+      profitFactor: grossLosses ? grossWins / grossLosses : grossWins ? null : 0,
+      expectancyR: trades.length ? trades.reduce((sum, trade) => sum + trade.netR, 0) / trades.length : null,
+      netPnl, finalEquity: equity, maxDrawdownPct: maxDrawdown,
+      avgR: trades.length ? trades.reduce((sum, trade) => sum + trade.netR, 0) / trades.length : null
+    },
+    trades,
+    limitations: ['Signals are evaluated at bar close and entered at the next bar open.', 'If stop and target are both touched in one candle, stop is assumed first.', 'Results are historical simulation, not a forecast; use out-of-sample and walk-forward validation.']
+  };
+}
