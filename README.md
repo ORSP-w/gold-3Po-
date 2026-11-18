@@ -9,6 +9,7 @@ GOLD-3Po is a read-only market-structure research workspace. It does not route, 
 3. **Market engine:** OHLC aggregation, price-level activity, Delta, Cumulative Delta, adjacent and stacked imbalance candidates, repeated liquidity pools, sweeps/reclaims, and conservative unknown-side handling.
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.
 5. **Decision support:** evidence-scored liquidity-sweep signals, walk-forward historical win-rate calibration, browser alerts, position sizing and risk guardrails.
+6. **Offline licensing:** Ed25519-signed licence keys bound to one computer, valid 1–9999 days, verified locally with no licence server; activation screen, clock-rollback protection and a vendor-side key generator. See `LICENSE-KEYS.md`.
 
 ## Windows desktop application
 
@@ -57,9 +58,11 @@ Open `http://127.0.0.1:8787`. The API and UI are served from the same origin. `n
 
 ## API
 
-All ingest endpoints require `Authorization: Bearer <MARKET_INGEST_TOKEN>`.
+All ingest endpoints require `Authorization: Bearer <MARKET_INGEST_TOKEN>`. Analysis, replay, backtest, signals, risk and SSE additionally require a valid offline licence key (`402 license_required` otherwise); ingest and health stay open so expired licences never lose market data.
 
 - `GET /health` — server, storage, feed freshness and active SSE clients.
+- `GET /v1/license/status` — licence state and this computer's Machine ID (always open).
+- `POST /v1/license/activate` — activate a signed `GOLD1.…` key (rate-limited).
 - `POST /v1/ingest/mt5/tick` — single MT5 quote event.
 - `POST /v1/ingest/mt5/live-batch` — ordered, idempotent live MT5 batch (used by the EA).
 - `POST /v1/ingest/mt5/history` — historical MT5 batch; history event identity is separate from the live sequence.

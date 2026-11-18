@@ -7,10 +7,11 @@ import { calculateRiskPlan } from './risk-engine.js';
 import { pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
 import { buildMarketAnalysis } from './market-engine.js';
+import { createLicenseManager } from './license.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 1000000;
-const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'] };
+const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -43,8 +44,12 @@ function normalizeComex(input) {
   return { type: 'trade', source: 'comex', venue: 'comex_futures', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, eventId: 'COMEX-' + input.tradeId.trim(), tradeId: input.tradeId.trim(), price: input.price, size: input.size, aggressorSide: input.aggressorSide, volumeKind: 'exchange_trade_size' };
 }
 
-export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl' } = {}) {
+export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl', license = null } = {}) {
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set(); const seenEventIds = new Set();
+  const licenseManager = license || createLicenseManager({ now });
+  let activateAttempts = [];
+  // External clock reference: newest ingested market event timestamp (broker/exchange time).
+  const feedNowMs = () => events.length ? (Date.parse(events.at(-1).timestamp) || 0) : 0;
   const dataFile = storageFile;
   const storageReady = dataFile ? (async () => {
     try {
@@ -81,6 +86,24 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     const asset = STATIC_FILES[url.pathname];
     if (req.method === 'GET' && asset) { try { const content = await readFile(new URL('./' + asset[0], import.meta.url)); res.writeHead(200, { 'content-type': asset[1], 'cache-control': 'no-cache' }); res.end(content); return; } catch { return json(res, 500, { error: 'asset_read_failed' }); } }
     if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, health());
+    if (req.method === 'GET' && url.pathname === '/v1/license/status') return json(res, 200, await licenseManager.status(feedNowMs()));
+    if (req.method === 'POST' && url.pathname === '/v1/license/activate') {
+      const at = now();
+      activateAttempts = activateAttempts.filter(t => at - t < 60000);
+      if (activateAttempts.length >= 10) return json(res, 429, { error: 'too_many_attempts', message: 'Wait a minute before trying again.' });
+      activateAttempts.push(at);
+      try {
+        const body = await readJson(req);
+        const result = await licenseManager.activate(typeof body?.key === 'string' ? body.key.trim() : '');
+        return json(res, result.valid ? 200 : 422, result);
+      } catch (error) { return json(res, error.status || 400, { error: 'invalid_request', message: error.message }); }
+    }
+    // Licence gate: analysis, replay, backtest, signals, risk and SSE require a valid licence.
+    // Ingest stays open so an expired licence never loses incoming market data; /health stays open for diagnostics.
+    if (!url.pathname.startsWith('/v1/ingest/')) {
+      const licenceStatus = await licenseManager.status(feedNowMs());
+      if (!licenceStatus.valid) return json(res, 402, { error: 'license_required', reason: licenceStatus.reason, machineId: licenceStatus.machineId, activate: '/v1/license/activate' });
+    }
     if (req.method === 'GET' && url.pathname === '/v1/market/snapshot') {
       const symbol = url.searchParams.get('symbol')?.toUpperCase(); const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
       const selected = events.filter(e => !symbol || e.symbol === symbol).slice(-limit);

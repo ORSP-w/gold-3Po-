@@ -1,9 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { createMarketServer } from './server.js';
+import { createLicenseManager, issueLicenseKey } from './license.js';
+
+function testLicense(now = () => Date.now()) {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const machineId = 'AAAA-BBBB-CCCC-DDDD';
+  const key = issueLicenseKey({ privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }), machineId, days: 30, nowMs: now() });
+  return createLicenseManager({ publicKeyPem: publicKey.export({ type: 'spki', format: 'pem' }), machineId, now, licenseFile: null, stateFile: null, initialKey: key });
+}
 
 let server; let base;
-test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
+test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense() }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
 test.afterEach(async () => { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 const auth = { authorization: 'Bearer test-secret', 'content-type': 'application/json' };
 const mt5 = (sequence=1) => ({ source:'mt5',symbol:'XAUUSD',timestamp:'2026-11-17T15:00:00.000Z',sequence,bid:2648.2,ask:2648.4,last:2648.3,tickVolume:1,realVolume:0 });
@@ -18,8 +27,8 @@ test('snapshot filters by symbol and bounded event limit',async()=>{for(const ev
 
 test('SSE stream remains subscribed and receives normalized market events',async()=>{const response=await fetch(base+'/v1/stream');assert.equal(response.status,200);assert.match(response.headers.get('content-type'),/text\/event-stream/);const reader=response.body.getReader();const first=await reader.read();assert.match(new TextDecoder().decode(first.value),/event: ready/);await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(mt5())});const next=await reader.read();assert.match(new TextDecoder().decode(next.value),/event: market/);await reader.cancel();});
 
-test('server refuses ingestion when no secret is configured',async()=>{const app=createMarketServer({token:'',storageFile:null});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));try{const url='http://127.0.0.1:'+app.server.address().port;const r=await fetch(url+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(mt5())});assert.equal(r.status,503);assert.equal((await r.json()).error,'ingest_not_configured');}finally{await new Promise(resolve=>app.server.close(resolve));}});
-test('feed health changes to stale after the configured threshold',async()=>{let clock=1000;const app=createMarketServer({token:'test-secret',now:()=>clock,staleAfterMs:500});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));try{const url='http://127.0.0.1:'+app.server.address().port;await fetch(url+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(mt5())});clock=2000;const h=await (await fetch(url+'/health')).json();assert.equal(h.feeds[0].status,'stale');}finally{await new Promise(resolve=>app.server.close(resolve));}});
+test('server refuses ingestion when no secret is configured',async()=>{const app=createMarketServer({token:'',storageFile:null,license:testLicense()});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));try{const url='http://127.0.0.1:'+app.server.address().port;const r=await fetch(url+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(mt5())});assert.equal(r.status,503);assert.equal((await r.json()).error,'ingest_not_configured');}finally{await new Promise(resolve=>app.server.close(resolve));}});
+test('feed health changes to stale after the configured threshold',async()=>{let clock=1000;const app=createMarketServer({token:'test-secret',now:()=>clock,staleAfterMs:500,license:testLicense(()=>clock)});await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));try{const url='http://127.0.0.1:'+app.server.address().port;await fetch(url+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(mt5())});clock=2000;const h=await (await fetch(url+'/health')).json();assert.equal(h.feeds[0].status,'stale');}finally{await new Promise(resolve=>app.server.close(resolve));}});
 
 test('oversized request bodies return 413 and server remains usable',async()=>{const huge='x'.repeat(1025*1024);const r=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:huge});assert.equal(r.status,413);const h=await fetch(base+'/health');assert.equal(h.status,200);});
 
