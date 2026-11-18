@@ -24,11 +24,13 @@ npm start
 
 Open `http://127.0.0.1:8787`. The API and UI are served from the same origin. `npm run serve` starts a static preview only and does not provide the API.
 
-## Windows test release
+## Windows installer
 
-For a first local run, extract the test ZIP and launch `START-HERE-WINDOWS.ps1` with PowerShell. It creates a random local ingest token in `.env` and starts the application. Full setup, RoboForex MT5 connection and test checklist: `RELEASE-TEST-NOTES.md`.
+Download the **GOLD-3Po Setup .exe** from the latest GitHub pre-release. Run it and finish the setup wizard. The installer bundles the Node.js runtime, so no separate Node.js installation, terminal commands, npm install or manual ZIP extraction is required. Administrator rights are not required.
 
-The CI workflow packages `GOLD-3Po-v0.2.0-test.zip` only after unit tests, syntax checks and Chromium UI checks pass. It also creates a SHA-256 checksum and build manifest.
+The installer creates Start Menu and desktop shortcuts. Launch **GOLD-3Po Market Lab** to start the local service and open the browser; use **Stop GOLD-3Po** to stop it. The local configuration, ingestion token and market-event archive are stored beside the installation and are preserved when the app is updated. Full MT5 connection steps and test checklist: `RELEASE-TEST-NOTES.md`.
+
+The Windows release workflow runs unit tests and JavaScript syntax checks, builds the self-contained Windows x64 installer, computes SHA-256, and publishes a GitHub pre-release. The installer is not code-signed; Windows may display an unknown-publisher warning.
 
 ## API
 
