@@ -2,7 +2,6 @@
 #property version "2.00"
 #property description "GOLD-3Po RoboForex MT5 bridge: 30-day available tick history plus live broker quotes."
 
-input string IngestUrl = "http://127.0.0.1:8787/v1/ingest/mt5/tick";
 input string HistoryUrl = "http://127.0.0.1:8787/v1/ingest/mt5/history";
 input string LiveBatchUrl = "http://127.0.0.1:8787/v1/ingest/mt5/live-batch";
 input string IngestToken = "";
@@ -135,6 +134,23 @@ bool FlushLiveBatch()
    return true;
 }
 
+ulong NextSequence()
+{
+   for(int attempt=0; attempt<32; attempt++)
+   {
+      double current = GlobalVariableGet(sequenceKey);
+      double candidate = MathMax(current, (double)sequenceNumber) + 1.0;
+      if(candidate >= 9007199254740991.0) return 0;
+      if(GlobalVariableSetOnCondition(sequenceKey, candidate, current))
+      {
+         sequenceNumber = (ulong)candidate;
+         return sequenceNumber;
+      }
+   }
+   Print("GOLD-3Po: could not reserve a unique live sequence number.");
+   return 0;
+}
+
 void OnTick()
 {
    MqlTick tick;
@@ -149,16 +165,16 @@ void OnTick()
       }
       return;
    }
+   ulong nextSequence = NextSequence();
+   if(nextSequence == 0) return;
    if(ArrayResize(pendingTicks, queued+1) != queued+1) return;
    if(ArrayResize(pendingSequences, queued+1) != queued+1)
    {
       ArrayResize(pendingTicks, queued);
       return;
    }
-   sequenceNumber++;
-   GlobalVariableSet(sequenceKey, (double)sequenceNumber);
    pendingTicks[queued] = tick;
-   pendingSequences[queued] = sequenceNumber;
+   pendingSequences[queued] = nextSequence;
    if(queued == 0) queueLimitLogged = false;
 }
 
@@ -166,8 +182,14 @@ int OnInit()
 {
    sequenceKey = "G3P_SEQ_" + _Symbol;
    ulong epochSeed = (ulong)TimeGMT() * 1000;
-   if(GlobalVariableCheck(sequenceKey)) sequenceNumber = (ulong)MathMax((double)epochSeed, GlobalVariableGet(sequenceKey));
-   else sequenceNumber = epochSeed;
+   if(!GlobalVariableCheck(sequenceKey)) GlobalVariableSet(sequenceKey, (double)epochSeed);
+   double storedSequence = GlobalVariableGet(sequenceKey);
+   if(storedSequence < (double)epochSeed)
+   {
+      GlobalVariableSetOnCondition(sequenceKey, (double)epochSeed, storedSequence);
+      storedSequence = GlobalVariableGet(sequenceKey);
+   }
+   sequenceNumber = (ulong)storedSequence;
    if(StringLen(IngestToken) < 24)
    {
       Print("GOLD-3Po: set an ingest token of at least 24 characters.");
