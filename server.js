@@ -209,7 +209,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           seenEventIds.add(eventFingerprint(stored));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
-          const packet = `event: market\\ndata: ${JSON.stringify(stored)}\\n\\n`;
+          const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
           for (const client of clients) client.write(packet);
           accepted++;
         }
