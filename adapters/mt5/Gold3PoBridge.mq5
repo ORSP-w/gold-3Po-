@@ -4,6 +4,7 @@
 
 input string IngestUrl = "http://127.0.0.1:8787/v1/ingest/mt5/tick";
 input string HistoryUrl = "http://127.0.0.1:8787/v1/ingest/mt5/history";
+input string LiveBatchUrl = "http://127.0.0.1:8787/v1/ingest/mt5/live-batch";
 input string IngestToken = "";
 input int MinIntervalMs = 100;
 input int RequestTimeoutMs = 5000;
@@ -12,11 +13,10 @@ input int HistoryBatchSize = 1000;
 input int HistoryRetryMinutes = 15;
 
 ulong sequenceNumber = 0;
-ulong lastSentAt = 0;
-long lastTickMsc = 0;
-double lastBid = 0, lastAsk = 0, lastLast = 0;
-ulong lastVolume = 0;
 string sequenceKey = "";
+MqlTick pendingTicks[];
+ulong pendingSequences[];
+bool queueLimitLogged = false;
 bool historySynchronized = false;
 ulong nextHistoryRetryAt = 0;
 
@@ -106,6 +106,62 @@ bool SyncHistory()
    return complete;
 }
 
+bool FlushLiveBatch()
+{
+   int available = ArraySize(pendingTicks);
+   if(available <= 0) return true;
+   int count = MathMin(1000, available);
+   string body = "{\"source\":\"mt5\",\"symbol\":\"" + _Symbol + "\",\"ticks\":[";
+   for(int i=0; i<count; i++)
+   {
+      MqlTick tick = pendingTicks[i];
+      double lastPrice = tick.last > 0 ? tick.last : (tick.bid + tick.ask) / 2.0;
+      string eventId = StringFormat("LIVE-%I64u", pendingSequences[i]);
+      if(i > 0) body += ",";
+      body += StringFormat(
+         "{\"timestamp\":\"%s\",\"sequence\":%I64u,\"eventId\":\"%s\",\"bid\":%.10f,\"ask\":%.10f,\"last\":%.10f,\"tickVolume\":%I64u,\"realVolume\":%.4f,\"flags\":%u}",
+         TickStamp(tick.time_msc), pendingSequences[i], eventId, tick.bid, tick.ask, lastPrice, tick.volume, tick.volume_real, tick.flags
+      );
+   }
+   body += "]}";
+   if(!PostJson(LiveBatchUrl, body)) return false;
+   for(int i=count; i<available; i++)
+   {
+      pendingTicks[i-count] = pendingTicks[i];
+      pendingSequences[i-count] = pendingSequences[i];
+   }
+   ArrayResize(pendingTicks, available-count);
+   ArrayResize(pendingSequences, available-count);
+   return true;
+}
+
+void OnTick()
+{
+   MqlTick tick;
+   if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
+   int queued = ArraySize(pendingTicks);
+   if(queued >= 20000)
+   {
+      if(!queueLimitLogged)
+      {
+         Print("GOLD-3Po: live buffer is full; incoming ticks are being skipped until delivery recovers.");
+         queueLimitLogged = true;
+      }
+      return;
+   }
+   if(ArrayResize(pendingTicks, queued+1) != queued+1) return;
+   if(ArrayResize(pendingSequences, queued+1) != queued+1)
+   {
+      ArrayResize(pendingTicks, queued);
+      return;
+   }
+   sequenceNumber++;
+   GlobalVariableSet(sequenceKey, (double)sequenceNumber);
+   pendingTicks[queued] = tick;
+   pendingSequences[queued] = sequenceNumber;
+   if(queued == 0) queueLimitLogged = false;
+}
+
 int OnInit()
 {
    sequenceKey = "G3P_SEQ_" + _Symbol;
@@ -135,19 +191,6 @@ void OnTimer()
       historySynchronized = SyncHistory();
       nextHistoryRetryAt = nowMs + (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
    }
-   if(lastSentAt != 0 && nowMs - lastSentAt < (ulong)MathMax(10, MinIntervalMs)) return;
-   MqlTick tick;
-   if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
-   if(tick.time_msc == lastTickMsc && tick.bid == lastBid && tick.ask == lastAsk && tick.last == lastLast && tick.volume == lastVolume) return;
-   lastTickMsc = tick.time_msc; lastBid = tick.bid; lastAsk = tick.ask; lastLast = tick.last; lastVolume = tick.volume;
-   lastSentAt = nowMs;
-   sequenceNumber++;
-   GlobalVariableSet(sequenceKey, (double)sequenceNumber);
-   double lastPrice = tick.last > 0 ? tick.last : (tick.bid + tick.ask) / 2.0;
-   string body = StringFormat(
-      "{\"source\":\"mt5\",\"symbol\":\"%s\",\"timestamp\":\"%s\",\"sequence\":%I64u,\"bid\":%.10f,\"ask\":%.10f,\"last\":%.10f,\"tickVolume\":%I64u,\"realVolume\":%.4f,\"flags\":%u}",
-      _Symbol, TickStamp(tick.time_msc), sequenceNumber, tick.bid, tick.ask, lastPrice, tick.volume, tick.volume_real, tick.flags
-   );
-   if(!PostJson(IngestUrl, body))
-      Print("GOLD-3Po: live quote delivery failed. Check MT5 WebRequest allowlist and API health.");
+   if(ArraySize(pendingTicks) > 0 && !FlushLiveBatch())
+      Print("GOLD-3Po: pending live tick batch retained for retry. Check API/WebRequest connectivity.");
 }
