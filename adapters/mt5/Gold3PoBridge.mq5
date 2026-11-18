@@ -26,6 +26,7 @@ datetime historyCursor = 0;
 datetime historyEnd = 0;
 datetime historyChunkEnd = 0;
 bool historyChunkLoaded = false;
+int historyFailures = 0;
 
 string TickStamp(const long timeMsc)
 {
@@ -86,6 +87,16 @@ void StartHistorySync()
    Print("GOLD-3Po: scheduled up to ", days, " days of broker history. Live collection starts immediately.");
 }
 
+void ScheduleHistoryRetry()
+{
+   historyFailures++;
+   ulong delayMs = 1000;
+   int exponent = MathMin(historyFailures - 1, 7);
+   for(int i=0; i<exponent; i++) delayMs *= 2;
+   if(historyFailures >= 8) delayMs = (ulong)MathMax(1, HistoryRetryMinutes) * 60000;
+   nextHistoryRetryAt = GetTickCount64() + delayMs;
+}
+
 void ProcessHistorySync()
 {
    if(historySynchronized) return;
@@ -109,7 +120,7 @@ void ProcessHistorySync()
       if(copied < 0)
       {
          Print("GOLD-3Po: history chunk unavailable at ", TimeToString(historyCursor), " error=", GetLastError(), ". Retry scheduled.");
-         nextHistoryRetryAt = GetTickCount64() + 1000;
+         ScheduleHistoryRetry();
          return;
       }
 
@@ -130,11 +141,12 @@ void ProcessHistorySync()
       if(!SendHistoryBatch(historyTicks, historyOffset, count, historySequence))
       {
          Print("GOLD-3Po: history upload failed; the same batch will be retried idempotently.");
-         nextHistoryRetryAt = GetTickCount64() + 1000;
+         ScheduleHistoryRetry();
          return;
       }
       historyOffset += count;
       historyTotalTicks += (ulong)count;
+      historyFailures = 0;
    }
 
    if(historyOffset >= total)
