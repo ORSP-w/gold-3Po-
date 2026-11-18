@@ -15,6 +15,8 @@ on:
       - "app.js"
       - "styles.css"
       - "market-*.js"
+      - "license*.js"
+      - "machine-id.js"
       - "research-client.js"
       - "strategy-engine.js"
       - "backtest-engine.js"
@@ -65,7 +67,7 @@ jobs:
 
           @(
             "GOLD-3Po Market Lab Electron Windows installer",
-            "Version: 0.3.0",
+            "Version: 0.4.0",
             "Commit: $env:GITHUB_SHA",
             "Target: Windows x64",
             "Framework: Electron",
@@ -113,7 +115,7 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GOLD-3Po-Electron-Windows-Setup-0.3.0
+          name: GOLD-3Po-Electron-Windows-Setup-0.4.0
           path: release/*
           if-no-files-found: error
           retention-days: 30
@@ -121,8 +123,8 @@ jobs:
       - name: Publish GitHub pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.3.0-electron.${{ github.run_number }}
-          name: GOLD-3Po Market Lab v0.3.0 Electron
+          tag_name: v0.4.0.${{ github.run_number }}
+          name: GOLD-3Po Market Lab v0.4.0
           target_commitish: ${{ github.sha }}
           prerelease: true
           generate_release_notes: true
