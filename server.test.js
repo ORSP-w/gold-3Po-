@@ -38,3 +38,33 @@ test('MT5 history endpoint rejects oversized batches and missing authentication'
  const tooMany=Array.from({length:1001},(_,i)=>({...mt5(i+1)}));
  const large=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:tooMany})});assert.equal(large.status,422);
 });
+
+test('re-importing identical MT5 history is idempotent and does not poison live sequence numbers',async()=>{
+ const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
+ const send=()=>fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+ const first=await (await send()).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);
+ const second=await (await send()).json();assert.equal(second.accepted,0);assert.equal(second.duplicates,2);
+ const live=mt5(1);live.timestamp='2026-11-17T16:00:00.000Z';
+ const liveResponse=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(live)});
+ assert.equal(liveResponse.status,202,'historical batch sequences must not block the independent live sequence');
+});
+test('replay returns chronologically aggregated historical bars for a requested range',async()=>{
+ const ticks=[1,2,3].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
+ await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+ const response=await fetch(base+'/v1/market/replay?symbol=XAUUSD&from=2026-11-17T15:00:00.000Z&to=2026-11-17T16:00:00.000Z');
+ const data=await response.json();assert.equal(response.status,200);assert.equal(data.eventCount,3);assert.equal(data.bars.length,1);assert.equal(data.bars[0].tickCount,3);
+});
+test('backtest and signal monitor endpoints return explicit empty-history states',async()=>{
+ const [backtest,signals]=await Promise.all([
+  fetch(base+'/v1/market/backtest?symbol=XAUUSD'),
+  fetch(base+'/v1/market/signals?symbol=XAUUSD')
+ ]);
+ const bt=await backtest.json(),sig=await signals.json();
+ assert.equal(backtest.status,200);assert.equal(bt.summary.trades,0);assert.equal(bt.summary.winRate,null);
+ assert.equal(signals.status,200);assert.equal(sig.latest,null);assert.equal(sig.calibration.minimumSamples,30);
+});
+test('risk endpoint enforces sizing and reward-risk guardrails',async()=>{
+ const ok=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=0.5&entry=2650&stop=2645&target=2660&pointValue=1')).json();
+ const blocked=await (await fetch(base+'/v1/risk/plan?equity=10000&riskPct=2&entry=2650&stop=2645&target=2652&pointValue=1')).json();
+ assert.equal(ok.allowed,true);assert.equal(ok.quantity,10);assert.equal(blocked.allowed,false);
+});
