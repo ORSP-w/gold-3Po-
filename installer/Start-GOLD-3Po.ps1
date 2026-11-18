@@ -12,12 +12,12 @@ function Show-Failure([string]$message) {
 
 try {
     $node = Join-Path $root "runtime\node.exe"
-    if (-not (Test-Path -LiteralPath $node)) { throw "Startup error. See the installation logs. }
+    if (-not (Test-Path -LiteralPath $node)) { throw "Startup error. See the installation logs." }
 
     $envFile = Join-Path $root ".env"
     if (-not (Test-Path -LiteralPath $envFile)) {
         $example = Join-Path $root ".env.example"
-        if (-not (Test-Path -LiteralPath $example)) { throw "Startup error. See the installation logs. }
+        if (-not (Test-Path -LiteralPath $example)) { throw "Startup error. See the installation logs." }
 
         $bytes = New-Object byte[] 32
         $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -26,7 +26,7 @@ try {
 
         $config = [IO.File]::ReadAllText($example)
         $placeholder = "replace-with-a-long-random-secret"
-        if (-not $config.Contains($placeholder)) { throw "Startup error. See the installation logs. }
+        if (-not $config.Contains($placeholder)) { throw "Startup error. See the installation logs." }
         $config = $config.Replace($placeholder, $token)
         [IO.File]::WriteAllText($envFile, $config, [Text.Encoding]::ASCII)
     }
@@ -63,9 +63,9 @@ try {
         }
 
         if (-not $ready) {
-            $detail = "Startup error. See the installation logs.
-            if ($started -and $started.HasExited) { $detail += [Environment]::NewLine + "Startup error. See the installation logs. }
-            $detail += [Environment]::NewLine + "Startup error. See the installation logs.
+            $detail = "Startup error. See the installation logs."
+            if ($started -and $started.HasExited) { $detail += [Environment]::NewLine + "Startup error. See the installation logs." }
+            $detail += [Environment]::NewLine + "Startup error. See the installation logs."
             throw $detail
         }
     }
