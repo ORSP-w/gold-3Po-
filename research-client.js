@@ -28,6 +28,7 @@ function stopReplay() {
 async function exitReplay() {
   stopReplay();
   replayBars = [];
+  $('playReplay').disabled = true;
   $('replaySlider').disabled = true;
   $('liveView').disabled = true;
   $('replayPosition').textContent = 'Live market view';
@@ -47,7 +48,10 @@ function selectReplay(index) {
   window.dispatchEvent(new CustomEvent('market-replay-step',{detail:{index:safe}}));
 }
 async function loadReplay() {
+  replayBars = [];
   stopReplay();
+  $('replaySlider').disabled = true;
+  $('liveView').disabled = true;
   notify('Loading historical ticks and building replay bars…');
   const from = $('replayFrom').value, to = $('replayTo').value;
   const query = new URLSearchParams({symbol:'XAUUSD',intervalMs:'900000',priceStep:'0.1'});
