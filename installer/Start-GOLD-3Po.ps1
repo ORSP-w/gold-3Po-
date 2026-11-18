@@ -1,3 +1,5 @@
+param([switch]$NoBrowser)
+
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $logs = Join-Path $root "logs"
