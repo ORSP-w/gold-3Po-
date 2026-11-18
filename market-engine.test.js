@@ -26,7 +26,7 @@ test('unclassified OTC ticks remain unknown rather than fabricated bid/ask volum
   assert.equal(out.bars[0].bid,0);
   assert.equal(out.bars[0].ask,0);
   assert.equal(out.bars[0].unknown,2);
-  assert.equal(out.sideClassification,'only_explicit_aggressor_flags; otherwise_unknown');
+  assert.equal(out.sideClassification,'only_explicit_mt5_tick_flags; otherwise_unknown');
 });
 test('timeframe aggregation separates bars and orders ticks chronologically',()=>{
   const out=buildMarketAnalysis([
