@@ -160,8 +160,11 @@ jobs:
 
           try {
             Write-Host "Launching installer silently: $($installer.Name)"
-            & $installer.FullName /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- "/DIR=$installDir" "/LOG=$installLog"
-            if ($LASTEXITCODE -ne 0) { throw "Installer process returned exit code $LASTEXITCODE. Log: $installLog" }
+            $installerProcess = Start-Process -FilePath $installer.FullName -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$installDir", "/LOG=$installLog") -Wait -PassThru
+            if ($installerProcess.ExitCode -ne 0) {
+              $tail = if (Test-Path $installLog) { (Get-Content $installLog -Tail 60) -join [Environment]::NewLine } else { "Installer log was not created." }
+              throw ("Installer process returned exit code " + $installerProcess.ExitCode + ". Log: " + $installLog + [Environment]::NewLine + $tail)
+            }
             $installed = $true
 
             foreach ($required in @(
@@ -175,8 +178,12 @@ jobs:
             }
 
             Write-Host "Starting installed application using the bundled Node.js runtime..."
-            & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $startScript -NoBrowser
-            if ($LASTEXITCODE -ne 0) { throw "Application launcher exited with code $LASTEXITCODE" }
+            $launcherProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $startScript, "-NoBrowser") -Wait -PassThru
+            if ($launcherProcess.ExitCode -ne 0) {
+              $startupLog = Join-Path $installDir "logs\startup-error.log"
+              $detail = if (Test-Path $startupLog) { Get-Content $startupLog -Raw } else { "No startup error log was created." }
+              throw ("Application launcher exited with code " + $launcherProcess.ExitCode + ". " + $detail)
+            }
 
             $healthy = $false
             for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -199,10 +206,10 @@ jobs:
             Write-Host "PASS: installer launches, files install, bundled Node.js starts, and HTTP health/root checks pass."
           } finally {
             if (Test-Path -LiteralPath $stopScript) {
-              & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $stopScript
+              $stopProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $stopScript) -Wait -PassThru
             }
             if (Test-Path -LiteralPath $uninstaller) {
-              & $uninstaller /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+              $uninstallProcess = Start-Process -FilePath $uninstaller -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") -Wait -PassThru
             }
           }
 
