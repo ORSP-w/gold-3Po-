@@ -39,11 +39,12 @@ test('MT5 history endpoint rejects oversized batches and missing authentication'
  const large=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:tooMany})});assert.equal(large.status,422);
 });
 
-test('re-importing identical MT5 history is idempotent and does not poison live sequence numbers',async()=>{
- const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
- const send=()=>fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
- const first=await (await send()).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);
- const second=await (await send()).json();assert.equal(second.accepted,0);assert.equal(second.duplicates,2);
+test('re-importing MT5 history is idempotent even when the rolling history sequence changes',async()=>{
+ const ticks=[1,2].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,eventId:'XAUUSD-history-'+sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:10,realVolume:0,flags:0}));
+ const send=items=>fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:items})});
+ const first=await (await send(ticks)).json();assert.equal(first.accepted,2);assert.equal(first.duplicates,0);
+ const shifted=ticks.map(tick=>({...tick,sequence:tick.sequence+1000}));
+ const second=await (await send(shifted)).json();assert.equal(second.accepted,0);assert.equal(second.duplicates,2);
  const live=mt5(1);live.timestamp='2026-11-17T16:00:00.000Z';
  const liveResponse=await fetch(base+'/v1/ingest/mt5/tick',{method:'POST',headers:auth,body:JSON.stringify(live)});
  assert.equal(liveResponse.status,202,'historical batch sequences must not block the independent live sequence');
