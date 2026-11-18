@@ -15,7 +15,7 @@ test('live feed status client uses same-origin health and SSE endpoints',async()
 test('research controls are wired to replay, backtest, risk and alert actions',async()=>{
  const client=await readFile(new URL('./research-client.js',import.meta.url),'utf8');
  for(const id of ['replayFrom','replayTo','replaySlider','replayPosition','backtestSummary','riskResult','signalMonitor'])assert.ok(html.includes('id="'+id+'"'),'Missing research target '+id);
- for(const id of ['loadReplay','playReplay','pauseReplay','replaySlider','runBacktest','calculateRisk','enableAlerts'])assert.ok(client.includes("$('"+id+"')?.addEventListener"),'Research control has no handler: '+id);
+ for(const id of ['loadReplay','playReplay','pauseReplay','liveView','replaySlider','runBacktest','calculateRisk','enableAlerts'])assert.ok(client.includes("$('"+id+"')?.addEventListener"),'Research control has no handler: '+id);
  assert.match(client,/\/v1\/market\/replay/);
  assert.match(client,/\/v1\/market\/backtest/);
  assert.match(client,/\/v1\/risk\/plan/);
