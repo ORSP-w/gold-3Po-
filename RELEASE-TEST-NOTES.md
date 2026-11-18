@@ -41,6 +41,8 @@ The EA is data-only. It cannot place or manage orders. Keep it on a demo account
 - Risk plan blocks risk above 1% and reward/risk below 1.5:1.
 - After closing and reopening the app, imported market history and the activated licence remain available.
 - Non-gold symbols (e.g. EURUSD) are rejected by the API; only XAUUSD/GC data is accepted.
+- Custom conditions: save a named setup, apply it, confirm signals/backtest/risk defaults follow it; export and re-import the JSON (import creates a new identity, unknown fields are rejected).
+- MT5 zone drawing: with the EA attached, liquidity-zone rectangles and labels appear on the XAUUSD chart and refresh every few seconds as new ticks arrive; removing the EA removes all G3P_ objects.
 
 An empty replay or zero backtest trades can be a valid result when there is not enough available broker history or no qualifying liquidity-sweep setup.
 

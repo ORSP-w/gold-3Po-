@@ -27,6 +27,19 @@ RoboForex XAUUSD is an OTC/CFD instrument, not centralized COMEX futures. The EA
 
 The 30-day history request means “up to the history available from the broker and terminal”. It cannot guarantee a complete month of ticks. Check the available event count, gaps and feed age before interpreting a chart as complete.
 
+## Live liquidity-zone drawing (v2.10)
+
+With `DrawZones=true` (default) the EA polls `GET /v1/chart/zones?symbol=XAUUSD` every `ZonesRefreshSeconds` (default 5) and redraws the detected liquidity zones on the chart:
+
+- **Buy-side zones** (repeated swing highs above price): teal rectangles; **sell-side zones** (repeated swing lows): red rectangles. Colors are inputs (`BuyZoneColor`, `SellZoneColor`).
+- Each rectangle spans `ZoneLookbackBars` (default 200) of history into the near future and carries a label `side LQ strength distance` plus a tooltip.
+- A status line in the top-left corner shows zone counts and the last refresh time.
+- Zones are rebuilt from the latest market analysis on every refresh, so they **follow the market**: new repeated levels appear, consumed levels disappear.
+- All objects use the `G3P_` prefix and are removed when the EA is detached.
+- If the licence is missing/expired (`402`), the EA clears the zones and shows a licence-required notice; tick ingestion continues regardless.
+
+Zones are heuristic repeated-swing estimates, not confirmed order-book depth. A reaction at a zone is probable, not guaranteed.
+
 ## Operational boundary
 
 - The EA must be compiled in MetaEditor. GitHub Actions cannot compile MQL5 source.

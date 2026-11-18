@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { createMarketServer } from './server.js';
 import { createLicenseManager, issueLicenseKey } from './license.js';
+import { createSetupStore } from './setup-store.js';
 
 function testLicense(now = () => Date.now()) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -12,7 +13,7 @@ function testLicense(now = () => Date.now()) {
 }
 
 let server; let base;
-test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense() }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
+test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }) }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
 test.afterEach(async () => { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 const auth = { authorization: 'Bearer test-secret', 'content-type': 'application/json' };
 const mt5 = (sequence=1) => ({ source:'mt5',symbol:'XAUUSD',timestamp:'2026-11-17T15:00:00.000Z',sequence,bid:2648.2,ask:2648.4,last:2648.3,tickVolume:1,realVolume:0 });
@@ -109,4 +110,52 @@ test('gold-only boundary rejects non-gold symbols and accepts broker suffix vari
   assert.equal(analysis.status,400);assert.equal((await analysis.json()).error,'symbol_not_gold');
   const gc=await fetch(base+'/v1/market/analysis?source=comex&symbol=GCZ6');
   assert.equal(gc.status,200);
+});
+
+test('chart zones endpoint serves an EA-ready payload and rejects non-gold symbols',async()=>{
+  const ticks=[1,2,3].map(sequence=>({timestamp:'2026-11-17T15:0'+sequence+':00.000Z',sequence,bid:2648,ask:2648.2,last:2648.1,tickVolume:1,realVolume:0,flags:0}));
+  await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks})});
+  const r=await fetch(base+'/v1/chart/zones?symbol=XAUUSD');
+  assert.equal(r.status,200);
+  const b=await r.json();
+  assert.equal(b.symbol,'XAUUSD');
+  assert.ok(Array.isArray(b.zones));
+  assert.equal(b.lastPrice,2648.1);
+  assert.ok(b.generatedAt);
+  const bad=await fetch(base+'/v1/chart/zones?symbol=EURUSD');
+  assert.equal(bad.status,400);
+});
+
+test('setup library API saves, applies, exports and imports with strict validation',async()=>{
+  const definition={strategy:{minScore:0.6,requireStacked:true,allowedSides:['long']},backtest:{stopAtr:2,targetR:3},risk:{minRiskReward:2}};
+  const saved=await(await fetch(base+'/v1/setups',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Strict long',definition})})).json();
+  assert.ok(saved.setupId);assert.equal(saved.version,1);
+  const invalid=await fetch(base+'/v1/setups',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Bad',definition:{strategy:{secretToken:'x'}}})});
+  assert.equal(invalid.status,422);
+  const applied=await(await fetch(base+'/v1/setups/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:saved.setupId,version:1})})).json();
+  assert.equal(applied.activeId,saved.setupId);
+  assert.equal(applied.activeDefinition.strategy.requireStacked,true);
+  const list=await(await fetch(base+'/v1/setups')).json();
+  assert.equal(list.setups.length,1);
+  const exported=await(await fetch(base+'/v1/setups/export?id='+saved.setupId+'&version=1')).json();
+  assert.equal(exported.definition.backtest.targetR,3);
+  const imported=await(await fetch(base+'/v1/setups/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:'Imported copy',definition:exported.definition})})).json();
+  assert.notEqual(imported.setupId,saved.setupId);
+  const bt=await(await fetch(base+'/v1/market/backtest?symbol=XAUUSD')).json();
+  assert.equal(bt.setup.conditions.strategy.requireStacked,true);
+  assert.equal(bt.config.stopAtr,2);
+  const risk=await(await fetch(base+'/v1/risk/plan?equity=10000&riskPct=0.5&entry=2650&stop=2645&target=2657&pointValue=1')).json();
+  assert.equal(risk.allowed,false);
+});
+
+test('zones and setups endpoints are licence-gated',async()=>{
+  const manager=createLicenseManager({publicKeyPem:'unused',machineId:'AAAA-BBBB-CCCC-DDDD',licenseFile:null,stateFile:null,now:()=>Date.now()});
+  const app=createMarketServer({token:'test-secret',storageFile:null,license:manager,setupStore:createSetupStore({file:null})});
+  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+  const url='http://127.0.0.1:'+app.server.address().port;
+  try{
+    assert.equal((await fetch(url+'/v1/chart/zones')).status,402);
+    assert.equal((await fetch(url+'/v1/setups')).status,402);
+    assert.equal((await fetch(url+'/health')).status,200);
+  }finally{await new Promise(resolve=>app.server.close(resolve));}
 });

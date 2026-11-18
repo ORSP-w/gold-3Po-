@@ -4,6 +4,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createMarketServer } from '../server.js';
 import { createLicenseManager } from '../license.js';
+import { createSetupStore } from '../setup-store.js';
 
 app.setName('GOLD-3Po Market Lab');
 app.setPath('userData', path.join(app.getPath('appData'), 'GOLD-3Po Market Lab'));
@@ -76,10 +77,12 @@ async function startLocalApi() {
     licenseFile: path.join(userDataPath, 'license.json'),
     stateFile: path.join(userDataPath, 'license-state.json')
   });
+  const setupStore = createSetupStore({ file: path.join(userDataPath, 'setups.json') });
   marketServer = createMarketServer({
     token: settings.marketIngestToken,
     storageFile: storagePath,
-    license
+    license,
+    setupStore
   }).server;
 
   const address = await listen(marketServer, port);
@@ -163,7 +166,7 @@ async function runSmokeTest() {
     throw new Error('The packaged application HTML is missing required workspace elements.');
   }
 
-  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/styles.css']) {
+  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/setups-client.js', '/styles.css']) {
     const response = await fetch(localOrigin + asset, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Application asset ${asset} returned HTTP ${response.status}.`);
   }

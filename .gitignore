@@ -6,3 +6,7 @@ release/
 dist/
 build/
 tools/license-private.pem
+pnpm-lock.yaml
+pnpm-workspace.yaml
+smoke-*.log
+

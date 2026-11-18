@@ -1,6 +1,6 @@
 #property strict
-#property version "2.00"
-#property description "GOLD-3Po RoboForex MT5 bridge: 30-day available tick history plus live broker quotes."
+#property version "2.10"
+#property description "GOLD-3Po RoboForex MT5 bridge: tick history, live quotes and live liquidity-zone drawing on the chart."
 
 input string HistoryUrl = "http://127.0.0.1:8787/v1/ingest/mt5/history";
 input string LiveBatchUrl = "http://127.0.0.1:8787/v1/ingest/mt5/live-batch";
@@ -10,6 +10,12 @@ input int RequestTimeoutMs = 5000;
 input int HistoryDays = 30;
 input int HistoryBatchSize = 1000;
 input int HistoryRetryMinutes = 15;
+input bool DrawZones = true;
+input string ZonesUrl = "http://127.0.0.1:8787/v1/chart/zones";
+input int ZonesRefreshSeconds = 5;
+input int ZoneLookbackBars = 200;
+input color BuyZoneColor = clrTeal;
+input color SellZoneColor = clrIndianRed;
 
 ulong sequenceNumber = 0;
 string sequenceKey = "";
@@ -27,6 +33,9 @@ datetime historyEnd = 0;
 datetime historyChunkEnd = 0;
 bool historyChunkLoaded = false;
 int historyFailures = 0;
+ulong nextZonesRefreshAt = 0;
+string zonesStatusText = "";
+int zonesDrawnCount = 0;
 
 string TickStamp(const long timeMsc)
 {
@@ -205,6 +214,165 @@ ulong NextSequence()
    return 0;
 }
 
+//--- Liquidity-zone drawing -------------------------------------------------
+
+bool GetJson(const string url, string &response)
+{
+   char data[];
+   ArrayResize(data, 0);
+   char result[];
+   string responseHeaders;
+   string headers = "Authorization: Bearer " + IngestToken + "\r\n";
+   ResetLastError();
+   int status = WebRequest("GET", url, headers, RequestTimeoutMs, data, result, responseHeaders);
+   if(status == 200)
+   {
+      response = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
+      return true;
+   }
+   if(status == 402)
+   {
+      response = "license_required";
+      return false;
+   }
+   Print("GOLD-3Po zones: GET failed status=", status, " error=", GetLastError());
+   response = "";
+   return false;
+}
+
+string JsonStringField(const string obj, const string key)
+{
+   string pattern = "\"" + key + "\":\"";
+   int start = StringFind(obj, pattern);
+   if(start < 0) return "";
+   start += StringLen(pattern);
+   int end = StringFind(obj, "\"", start);
+   if(end < 0) return "";
+   return StringSubstr(obj, start, end - start);
+}
+
+double JsonNumberField(const string obj, const string key)
+{
+   string pattern = "\"" + key + "\":";
+   int start = StringFind(obj, pattern);
+   if(start < 0) return EMPTY_VALUE;
+   start += StringLen(pattern);
+   int end = start;
+   int len = StringLen(obj);
+   while(end < len)
+   {
+      ushort ch = StringGetCharacter(obj, end);
+      if((ch >= '0' && ch <= '9') || ch == '-' || ch == '+' || ch == '.' || ch == 'e' || ch == 'E') end++;
+      else break;
+   }
+   if(end == start) return EMPTY_VALUE;
+   return StringToDouble(StringSubstr(obj, start, end - start));
+}
+
+void DeleteZoneObjects()
+{
+   ObjectsDeleteAll(0, "G3P_");
+}
+
+void SetZonesStatus(const string text)
+{
+   zonesStatusText = text;
+   string name = "G3P_STATUS";
+   if(ObjectFind(0, name) < 0) ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 10);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, 20);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clrSilver);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+}
+
+void RefreshZones()
+{
+   string response;
+   string url = ZonesUrl + "?symbol=" + _Symbol + "&source=mt5";
+   if(!GetJson(url, response))
+   {
+      DeleteZoneObjects();
+      zonesDrawnCount = 0;
+      if(response == "license_required") SetZonesStatus("GOLD-3Po: licence required — activate in the app to see zones");
+      else SetZonesStatus("GOLD-3Po zones: API unreachable");
+      ChartRedraw(0);
+      return;
+   }
+   int zonesStart = StringFind(response, "\"zones\":[");
+   if(zonesStart < 0)
+   {
+      DeleteZoneObjects();
+      zonesDrawnCount = 0;
+      SetZonesStatus("GOLD-3Po zones: no zone data yet");
+      ChartRedraw(0);
+      return;
+   }
+   zonesStart += StringLen("\"zones\":[");
+   int zonesEnd = StringFind(response, "]", zonesStart);
+   if(zonesEnd < 0) return;
+   string zonesJson = StringSubstr(response, zonesStart, zonesEnd - zonesStart);
+
+   DeleteZoneObjects();
+   zonesDrawnCount = 0;
+   int buyCount = 0, sellCount = 0;
+   int availableBars = Bars(_Symbol, _Period);
+   int lookback = (int)MathMin(ZoneLookbackBars, MathMax(10, availableBars - 1));
+   datetime timeLeft = iTime(_Symbol, _Period, lookback);
+   datetime timeRight = TimeCurrent() + PeriodSeconds() * 20;
+   if(timeLeft <= 0) timeLeft = TimeCurrent() - PeriodSeconds() * lookback;
+
+   int cursor = 0;
+   while(true)
+   {
+      int objStart = StringFind(zonesJson, "{", cursor);
+      if(objStart < 0) break;
+      int objEnd = StringFind(zonesJson, "}", objStart);
+      if(objEnd < 0) break;
+      string obj = StringSubstr(zonesJson, objStart, objEnd - objStart + 1);
+      cursor = objEnd + 1;
+
+      string id = JsonStringField(obj, "id");
+      string side = JsonStringField(obj, "side");
+      double low = JsonNumberField(obj, "low");
+      double high = JsonNumberField(obj, "high");
+      double strength = JsonNumberField(obj, "strength");
+      string distance = JsonStringField(obj, "distance");
+      string state = JsonStringField(obj, "state");
+      if(id == "" || low == EMPTY_VALUE || high == EMPTY_VALUE || high <= low) continue;
+
+      color zoneColor = (side == "buy") ? BuyZoneColor : SellZoneColor;
+      string rectName = "G3P_ZONE_" + id;
+      if(ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, timeLeft, low, timeRight, high))
+      {
+         ObjectSetInteger(0, rectName, OBJPROP_COLOR, zoneColor);
+         ObjectSetInteger(0, rectName, OBJPROP_STYLE, STYLE_SOLID);
+         ObjectSetInteger(0, rectName, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, rectName, OBJPROP_FILL, false);
+         ObjectSetInteger(0, rectName, OBJPROP_BACK, true);
+         ObjectSetInteger(0, rectName, OBJPROP_SELECTABLE, false);
+         ObjectSetString(0, rectName, OBJPROP_TOOLTIP, "GOLD-3Po " + side + "-side liquidity · strength " + DoubleToString(strength, 2) + " · " + state);
+      }
+      string labelName = "G3P_LBL_" + id;
+      double midPrice = (low + high) / 2.0;
+      if(ObjectCreate(0, labelName, OBJ_TEXT, 0, timeRight, midPrice))
+      {
+         ObjectSetString(0, labelName, OBJPROP_TEXT, " " + side + " LQ " + DoubleToString(strength, 2) + " " + distance);
+         ObjectSetInteger(0, labelName, OBJPROP_COLOR, zoneColor);
+         ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 8);
+         ObjectSetString(0, labelName, OBJPROP_FONT, "Consolas");
+         ObjectSetInteger(0, labelName, OBJPROP_ANCHOR, ANCHOR_LEFT);
+         ObjectSetInteger(0, labelName, OBJPROP_SELECTABLE, false);
+      }
+      zonesDrawnCount++;
+      if(side == "buy") buyCount++; else sellCount++;
+   }
+   SetZonesStatus(StringFormat("GOLD-3Po zones: %d (%d buy / %d sell) · %s", zonesDrawnCount, buyCount, sellCount, TimeToString(TimeCurrent(), TIME_SECONDS)));
+   ChartRedraw(0);
+}
+
 void OnTick()
 {
    MqlTick tick;
@@ -252,12 +420,18 @@ int OnInit()
    if(!SymbolSelect(_Symbol, true)) return INIT_FAILED;
    StartHistorySync();
    nextHistoryRetryAt = GetTickCount64();
+   nextZonesRefreshAt = GetTickCount64() + 2000;
    EventSetMillisecondTimer(MathMax(100, MinIntervalMs));
-   Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes and asynchronous history sync enabled.");
+   Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes, asynchronous history sync and zone drawing enabled.");
    return INIT_SUCCEEDED;
 }
 
-void OnDeinit(const int reason) { EventKillTimer(); }
+void OnDeinit(const int reason)
+{
+   EventKillTimer();
+   DeleteZoneObjects();
+   ChartRedraw(0);
+}
 
 void OnTimer()
 {
@@ -272,4 +446,9 @@ void OnTimer()
    }
    if(!historySynchronized && nowMs >= nextHistoryRetryAt)
       ProcessHistorySync();
+   if(DrawZones && nowMs >= nextZonesRefreshAt)
+   {
+      RefreshZones();
+      nextZonesRefreshAt = nowMs + (ulong)MathMax(1, ZonesRefreshSeconds) * 1000;
+   }
 }

@@ -177,4 +177,5 @@ window.addEventListener('market-analysis',()=>{
   if (signalTimer !== null) window.clearTimeout(signalTimer);
   signalTimer = window.setTimeout(()=>{signalTimer=null;refreshSignals();},1800);
 });
+window.addEventListener('setups-changed',()=>{refreshSignals();});
 refreshSignals();

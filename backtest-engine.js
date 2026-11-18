@@ -5,7 +5,7 @@ export function runBacktest(bars, options = {}) {
     initialEquity = 10000, riskPct = 0.5, maxRiskPct = 1,
     atrPeriod = 14, stopAtr = 1.5, targetR = 2,
     maxBars = 20, pointValue = 1, feePerUnit = 0, slippage = 0,
-    minScore = 0.55, maxTrades = 5000
+    minScore = 0.55, maxTrades = 5000, strategyConditions = null
   } = options;
   const numeric = [initialEquity, riskPct, maxRiskPct, stopAtr, targetR, pointValue, feePerUnit, slippage];
   if (!Array.isArray(bars) || numeric.some(value => !Number.isFinite(value)) ||
@@ -14,7 +14,7 @@ export function runBacktest(bars, options = {}) {
       !Number.isInteger(maxBars) || maxBars < 1 || !Number.isInteger(maxTrades) || maxTrades < 1) {
     throw new TypeError('Invalid backtest configuration');
   }
-  const signals = generateSignals(bars, { minScore, atrPeriod });
+  const signals = generateSignals(bars, strategyConditions ? { ...strategyConditions, minScore, atrPeriod } : { minScore, atrPeriod });
   let equity = initialEquity, peak = initialEquity, maxDrawdown = 0, cursor = 0;
   const trades = [];
   while (cursor < signals.length && trades.length < maxTrades) {

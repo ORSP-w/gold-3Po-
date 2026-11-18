@@ -8,10 +8,11 @@ import { pathToFileURL } from 'node:url';
 import { dirname } from 'node:path';
 import { buildMarketAnalysis } from './market-engine.js';
 import { createLicenseManager } from './license.js';
+import { createSetupStore } from './setup-store.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 1000000;
-const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'] };
+const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'], '/setups-client.js': ['setups-client.js', 'text/javascript; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -52,9 +53,10 @@ function normalizeComex(input) {
   return { type: 'trade', source: 'comex', venue: 'comex_futures', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, eventId: 'COMEX-' + input.tradeId.trim(), tradeId: input.tradeId.trim(), price: input.price, size: input.size, aggressorSide: input.aggressorSide, volumeKind: 'exchange_trade_size' };
 }
 
-export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl', license = null } = {}) {
+export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl', license = null, setupStore = null } = {}) {
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set(); const seenEventIds = new Set();
   const licenseManager = license || createLicenseManager({ now });
+  const setups = setupStore || createSetupStore({ file: process.env.SETUPS_FILE || './data/setups.json', now });
   let activateAttempts = [];
   // External clock reference: newest ingested market event timestamp (broker/exchange time).
   const feedNowMs = () => events.length ? (Date.parse(events.at(-1).timestamp) || 0) : 0;
@@ -112,6 +114,42 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const licenceStatus = await licenseManager.status(feedNowMs());
       if (!licenceStatus.valid) return json(res, 402, { error: 'license_required', reason: licenceStatus.reason, machineId: licenceStatus.machineId, activate: '/v1/license/activate' });
     }
+    if (req.method === 'GET' && url.pathname === '/v1/chart/zones') {
+      const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
+      const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
+      if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
+      const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
+      const selected = events.filter(e => e.symbol === symbol && e.source === source);
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 500 });
+      return json(res, 200, { symbol, source, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones: analysis.zones, generatedAt: new Date(now()).toISOString() });
+    }
+    if (url.pathname === '/v1/setups' || url.pathname === '/v1/setups/apply' || url.pathname === '/v1/setups/export' || url.pathname === '/v1/setups/import') {
+      try {
+        if (req.method === 'GET' && url.pathname === '/v1/setups') return json(res, 200, await setups.list());
+        if (req.method === 'GET' && url.pathname === '/v1/setups/export') {
+          const id = url.searchParams.get('id'); const version = url.searchParams.get('version');
+          if (!id) return json(res, 422, { error: 'invalid_setup_request', message: 'id is required' });
+          return json(res, 200, await setups.exportDefinition(id, version === null ? null : Number(version)));
+        }
+        if (req.method === 'POST' && url.pathname === '/v1/setups') {
+          const body = await readJson(req);
+          const result = await setups.save(body?.name, body?.definition);
+          return json(res, 200, result);
+        }
+        if (req.method === 'POST' && url.pathname === '/v1/setups/import') {
+          const body = await readJson(req);
+          const result = await setups.importSetup(body?.name, body?.definition);
+          return json(res, 200, result);
+        }
+        if (req.method === 'POST' && url.pathname === '/v1/setups/apply') {
+          const body = await readJson(req);
+          if (typeof body?.id !== 'string') return json(res, 422, { error: 'invalid_setup_request', message: 'id is required' });
+          return json(res, 200, await setups.apply(body.id, body.version ?? null));
+        }
+        return json(res, 405, { error: 'method_not_allowed' });
+      } catch (error) { return json(res, error.status || 422, { error: 'invalid_setup', message: error.message }); }
+    }
     if (req.method === 'GET' && url.pathname === '/v1/market/snapshot') {
       const symbol = url.searchParams.get('symbol')?.toUpperCase(); const limit = Math.min(500, Math.max(1, Number(url.searchParams.get('limit') || 100)));
       const selected = events.filter(e => !symbol || e.symbol === symbol).slice(-limit);
@@ -149,18 +187,22 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 });
+      const active = await setups.activeDefinition();
       const options = {
         initialEquity: Number(url.searchParams.get('initialEquity') || 10000),
-        riskPct: Number(url.searchParams.get('riskPct') || 0.5),
-        maxRiskPct: Number(url.searchParams.get('maxRiskPct') || 1),
-        stopAtr: Number(url.searchParams.get('stopAtr') || 1.5),
-        targetR: Number(url.searchParams.get('targetR') || 2),
-        maxBars: Number(url.searchParams.get('maxBars') || 20),
-        pointValue: Number(url.searchParams.get('pointValue') || 1),
-        feePerUnit: Number(url.searchParams.get('feePerUnit') || 0),
-        slippage: Number(url.searchParams.get('slippage') || 0)
+        riskPct: Number(url.searchParams.get('riskPct') || active.backtest.riskPct),
+        maxRiskPct: Number(url.searchParams.get('maxRiskPct') || active.backtest.maxRiskPct),
+        stopAtr: Number(url.searchParams.get('stopAtr') || active.backtest.stopAtr),
+        targetR: Number(url.searchParams.get('targetR') || active.backtest.targetR),
+        maxBars: Number(url.searchParams.get('maxBars') || active.backtest.maxBars),
+        pointValue: Number(url.searchParams.get('pointValue') || active.backtest.pointValue),
+        feePerUnit: Number(url.searchParams.get('feePerUnit') || active.backtest.feePerUnit),
+        slippage: Number(url.searchParams.get('slippage') || active.backtest.slippage),
+        minScore: active.strategy.minScore,
+        atrPeriod: active.strategy.atrPeriod,
+        strategyConditions: active.strategy
       };
-      try { return json(res, 200, { symbol, source, bars: analysis.bars.length, ...runBacktest(analysis.bars, options) }); }
+      try { return json(res, 200, { symbol, source, bars: analysis.bars.length, setup: { id: (await setups.list()).activeId, conditions: active }, ...runBacktest(analysis.bars, options) }); }
       catch (error) { return json(res, 422, { error: 'invalid_backtest', message: error.message }); }
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/signals') {
@@ -171,13 +213,15 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000 });
-      const signals = generateSignals(analysis.bars);
-      const simulation = runBacktest(analysis.bars);
+      const active = await setups.activeDefinition();
+      const signals = generateSignals(analysis.bars, active.strategy);
+      const simulation = runBacktest(analysis.bars, { ...active.backtest, minScore: active.strategy.minScore, atrPeriod: active.strategy.atrPeriod, strategyConditions: active.strategy });
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
       return json(res, 200, { symbol, source, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Technical scores are rule-based evidence weights, not probabilities. Probability is withheld until 30 prior same-direction trades have closed.' });
     }
     if (req.method === 'GET' && url.pathname === '/v1/risk/plan') {
-      const params = Object.fromEntries(url.searchParams.entries());
+      const active = await setups.activeDefinition();
+      const params = { maxRiskPct: String(active.risk.maxRiskPct), minRiskReward: String(active.risk.minRiskReward), ...Object.fromEntries(url.searchParams.entries()) };
       try { return json(res, 200, calculateRiskPlan(params)); }
       catch (error) { return json(res, 422, { error: 'invalid_risk_plan', message: error.message }); }
     }

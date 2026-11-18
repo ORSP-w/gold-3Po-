@@ -10,6 +10,8 @@ GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUU
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.
 5. **Decision support:** evidence-scored liquidity-sweep signals, walk-forward historical win-rate calibration, browser alerts, position sizing and risk guardrails.
 6. **Offline licensing:** Ed25519-signed licence keys bound to one computer, valid 1–9999 days, verified locally with no licence server; activation screen, clock-rollback protection and a vendor-side key generator. See `LICENSE-KEYS.md`.
+7. **Custom conditions (Vespera-style setup library):** named setups with append-only immutable versions, strict JSON import/export and explicit apply; conditions drive signals, backtest defaults and risk guardrails. See `docs/SETUPS.md`.
+8. **MT5 zone drawing:** the EA polls `/v1/chart/zones` and draws live liquidity-zone rectangles with labels on the MT5 chart, refreshed as the market evolves. Data-only, never trades.
 
 ## Windows desktop application
 
@@ -77,6 +79,8 @@ All ingest endpoints require `Authorization: Bearer <MARKET_INGEST_TOKEN>` and a
 - `GET /v1/market/signals?symbol=XAUUSD` — latest evidence-scored setup and chronological calibration.
 - `GET /v1/risk/plan?equity=10000&riskPct=0.5&entry=2650&stop=2645&target=2660&pointValue=1` — position size and risk checks.
 - `GET /v1/stream` — server-sent event stream.
+- `GET /v1/chart/zones?symbol=XAUUSD` — lightweight zone payload for the MT5 EA (licence-gated).
+- `GET /v1/setups`, `POST /v1/setups`, `POST /v1/setups/apply`, `GET /v1/setups/export`, `POST /v1/setups/import` — Vespera-style setup library (licence-gated). See `docs/SETUPS.md`.
 
 By default the API appends events to `./data/market-events.jsonl`, reloads that archive on restart, and retains the latest 1,000,000 events in memory for analysis. The JSONL archive is not automatically compacted. Plan disk retention and backup for a long-running production deployment.
 
