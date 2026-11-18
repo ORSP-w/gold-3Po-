@@ -105,7 +105,7 @@ async function runBacktest() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.message || data.error || 'Backtest failed');
     const s = data.summary;
-    $('backtestSummary').textContent = `${s.trades} trades · ${s.wins}W / ${s.losses}L · ${s.winRate===null?'—':(s.winRate*100).toFixed(1)+'%} win rate · ${s.netPnl>=0?'+':''}${money(s.netPnl)} P&L · ${s.maxDrawdownPct.toFixed(2)}% max drawdown`;
+    $('backtestSummary').textContent = `${s.trades} trades · ${s.wins}W / ${s.losses}L · ${s.winRate===null?'—':(s.winRate*100).toFixed(1)+'%'} win rate · ${s.netPnl>=0?'+':''}${money(s.netPnl)} P&L · ${s.maxDrawdownPct.toFixed(2)}% max drawdown`;
     $('backtestDetails').textContent = s.trades
       ? `Final equity ${money(s.finalEquity)} · Profit factor ${s.profitFactor===null?'∞':s.profitFactor.toFixed(2)} · Expectancy ${s.expectancyR.toFixed(3)}R · ${data.bars} bars`
       : `No qualifying setups in ${data.bars} available bars. Minimum warm-up and valid liquidity sweeps are required.`;
