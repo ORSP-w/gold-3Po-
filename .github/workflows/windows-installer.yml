@@ -1,0 +1,152 @@
+name: Windows installer release
+
+on:
+  push:
+    branches:
+      - feat/part-1-liquidity-footprint-workspace
+    paths:
+      - "installer/**"
+      - ".github/workflows/windows-installer.yml"
+      - "README.md"
+      - "RELEASE-TEST-NOTES.md"
+      - "package.json"
+      - "server.js"
+      - "index.html"
+      - "app.js"
+      - "styles.css"
+      - "market-*.js"
+      - "research-client.js"
+      - "strategy-engine.js"
+      - "backtest-engine.js"
+      - "risk-engine.js"
+      - "adapters/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js for build checks
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tests
+        shell: pwsh
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "Unit tests failed." }
+          npm run check
+          if ($LASTEXITCODE -ne 0) { throw "Syntax checks failed." }
+
+      - name: Stage application and bundled Node.js runtime
+        id: meta
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $baseVersion = (node -p "require('./package.json').version").Trim()
+          $appVersion = "$baseVersion-setup.$env:GITHUB_RUN_NUMBER"
+          "version=$appVersion" >> $env:GITHUB_OUTPUT
+
+          $stage = Join-Path $env:GITHUB_WORKSPACE "build\GOLD-3Po"
+          $runtime = Join-Path $stage "runtime"
+          New-Item -ItemType Directory -Force -Path $runtime | Out-Null
+
+          $files = @(
+            "index.html",
+            "app.js",
+            "styles.css",
+            "market-data.js",
+            "market-client.js",
+            "research-client.js",
+            "market-engine.js",
+            "strategy-engine.js",
+            "backtest-engine.js",
+            "risk-engine.js",
+            "server.js",
+            "package.json",
+            ".env.example",
+            "README.md",
+            "RELEASE-TEST-NOTES.md"
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path $file)) { throw "Required application file is missing: $file" }
+            Copy-Item -LiteralPath $file -Destination $stage
+          }
+
+          Copy-Item -LiteralPath "adapters" -Destination $stage -Recurse
+          Copy-Item -LiteralPath "installer\Start-GOLD-3Po.ps1" -Destination $stage
+          Copy-Item -LiteralPath "installer\Stop-GOLD-3Po.ps1" -Destination $stage
+          Copy-Item -LiteralPath "installer\Launch-GOLD-3Po.vbs" -Destination $stage
+          Copy-Item -LiteralPath "installer\Stop-GOLD-3Po.vbs" -Destination $stage
+
+          $nodeVersion = (node -p "process.version").Trim()
+          $zipName = "node-$nodeVersion-win-x64.zip"
+          $download = Join-Path $env:RUNNER_TEMP $zipName
+          $url = "https://nodejs.org/dist/$nodeVersion/$zipName"
+          Invoke-WebRequest -Uri $url -OutFile $download
+          $extract = Join-Path $env:RUNNER_TEMP "node-runtime"
+          Expand-Archive -LiteralPath $download -DestinationPath $extract -Force
+          $nodeFolder = Join-Path $extract "node-$nodeVersion-win-x64"
+          Copy-Item -LiteralPath (Join-Path $nodeFolder "node.exe") -Destination $runtime
+          if (Test-Path (Join-Path $nodeFolder "LICENSE")) {
+            Copy-Item -LiteralPath (Join-Path $nodeFolder "LICENSE") -Destination (Join-Path $runtime "NODE-LICENSE.txt")
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed." }
+
+      - name: Compile Windows installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $compiler = "\${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $compiler)) { throw "Inno Setup compiler was not found: $compiler" }
+          Push-Location installer
+          try {
+            & $compiler "/DAppVersion=\${{ steps.meta.outputs.version }}" "GOLD-3Po.iss"
+            if ($LASTEXITCODE -ne 0) { throw "Inno Setup compilation failed." }
+          } finally {
+            Pop-Location
+          }
+
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Installer EXE was not produced." }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$($installer.FullName).sha256" -Value "$hash  $($installer.Name)" -Encoding ascii
+          @(
+            "GOLD-3Po Market Lab Windows installer",
+            "Version: \${{ steps.meta.outputs.version }}",
+            "Commit: $env:GITHUB_SHA",
+            "Node.js runtime: bundled (Windows x64)",
+            "Tests: npm test and npm run check passed before packaging",
+            "Install mode: per-user; administrator rights are not required"
+          ) | Set-Content -LiteralPath "release\BUILD-INFO.txt" -Encoding utf8
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOLD-3Po-Windows-Installer-\${{ steps.meta.outputs.version }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v\${{ steps.meta.outputs.version }}
+          name: GOLD-3Po Market Lab v\${{ steps.meta.outputs.version }}
+          target_commitish: \${{ github.sha }}
+          prerelease: true
+          generate_release_notes: true
+          files: release/*
+          fail_on_unmatched_files: true
