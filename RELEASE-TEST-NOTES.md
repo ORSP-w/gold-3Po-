@@ -1,4 +1,4 @@
-# GOLD-3Po v0.3.0 — Electron Windows installer test
+# GOLD-3Po v0.4.0 — Electron Windows installer test
 
 ## Install and launch
 
