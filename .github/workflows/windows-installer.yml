@@ -178,11 +178,19 @@ jobs:
             }
 
             Write-Host "Starting installed application using the bundled Node.js runtime..."
-            $launcherProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $startScript, "-NoBrowser") -Wait -PassThru
+            $launcherStdout = Join-Path $env:RUNNER_TEMP "GOLD-3Po-launcher.stdout.log"
+            $launcherStderr = Join-Path $env:RUNNER_TEMP "GOLD-3Po-launcher.stderr.log"
+            $previousNoBrowser = $env:GOLD3PO_NO_BROWSER
+            try {
+              $env:GOLD3PO_NO_BROWSER = "1"
+              $launcherProcess = Start-Process -FilePath "powershell.exe" -ArgumentList @("-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $startScript) -Wait -PassThru -RedirectStandardOutput $launcherStdout -RedirectStandardError $launcherStderr
+            } finally {
+              $env:GOLD3PO_NO_BROWSER = $previousNoBrowser
+            }
             if ($launcherProcess.ExitCode -ne 0) {
               $startupLog = Join-Path $installDir "logs\startup-error.log"
-              $detail = if (Test-Path $startupLog) { Get-Content $startupLog -Raw } else { "No startup error log was created." }
-              throw ("Application launcher exited with code " + $launcherProcess.ExitCode + ". " + $detail)
+              $detail = @($launcherStdout, $launcherStderr, $startupLog) | Where-Object { Test-Path $_ } | ForEach-Object { Get-Content $_ -Raw }
+              throw ("Application launcher exited with code " + $launcherProcess.ExitCode + ". " + ($detail -join [Environment]::NewLine))
             }
 
             $healthy = $false
