@@ -66,7 +66,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
   })() : Promise.resolve();
-  async function persist(stored) { if (!dataFile) return; await mkdir(dirname(dataFile), { recursive:true }); await appendFile(dataFile, JSON.stringify(stored)+'\n'); }
+  async function persistMany(storedEvents) { if (!dataFile || !storedEvents.length) return; await mkdir(dirname(dataFile), { recursive:true }); await appendFile(dataFile, storedEvents.map(event => JSON.stringify(event)).join('\n')+'\n'); }
+  async function persist(stored) { return persistMany([stored]); }
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: MAX_EVENTS, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
@@ -138,6 +139,38 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache, no-transform', connection: 'keep-alive', 'x-accel-buffering': 'no' });
       res.write('event: ready\ndata: {"status":"connected"}\n\n'); clients.add(res);
       res.on('close', () => clients.delete(res)); return;
+    }
+    if (req.method === 'POST' && url.pathname === '/v1/ingest/mt5/live-batch') {
+      if (!token) return json(res, 503, { error: 'ingest_not_configured' });
+      if (!tokenMatches(req.headers.authorization, token)) return json(res, 401, { error: 'unauthorized' });
+      try {
+        const body = await readJson(req);
+        if (body?.source !== 'mt5' || !Array.isArray(body.ticks) || body.ticks.length < 1 || body.ticks.length > 1000 || typeof body.symbol !== 'string') return json(res, 422, { error:'invalid_live_batch', message:'Expected 1..1000 MT5 ticks and a symbol.' });
+        const key = 'mt5:' + body.symbol.trim().toUpperCase();
+        let sequenceCursor = lastSequence.get(key) || 0;
+        let duplicates = 0;
+        const additions = [];
+        for (const raw of body.ticks) {
+          const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol });
+          const eventId = event.eventId || eventFingerprint(event);
+          if (seenEventIds.has(eventId)) { duplicates++; continue; }
+          if (event.sequence <= sequenceCursor) return json(res, 409, { error:'sequence_not_increasing', lastAcceptedSequence:sequenceCursor });
+          sequenceCursor = event.sequence;
+          additions.push({ ...event, eventId, receivedAt:new Date(now()).toISOString() });
+        }
+        await persistMany(additions);
+        for (const stored of additions) {
+          seenEventIds.add(stored.eventId);
+          events.push(stored);
+          if (events.length > MAX_EVENTS) events.shift();
+          const existing = feeds.get(key);
+          feeds.set(key,{source:'mt5',symbol:stored.symbol,lastSequence:stored.sequence,receivedAt:Date.parse(stored.receivedAt),accepted:(existing?.accepted||0)+1});
+          const packet = `event: market\\ndata: ${JSON.stringify(stored)}\\n\\n`;
+          for (const client of clients) client.write(packet);
+        }
+        if (additions.length) lastSequence.set(key, sequenceCursor);
+        return json(res, 202, { accepted:additions.length, duplicates, total:body.ticks.length, lastAcceptedSequence:lastSequence.get(key)||0 });
+      } catch(error) { return json(res,error.status||422,{error:'invalid_live_batch',message:error.message}); }
     }
     if (req.method === 'POST' && url.pathname === '/v1/ingest/mt5/history') {
       if (!token) return json(res, 503, { error: 'ingest_not_configured' });
