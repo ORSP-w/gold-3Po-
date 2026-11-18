@@ -12,7 +12,7 @@ GOLD-3Po is a read-only market-structure research workspace. It does not route, 
 
 ## Run locally
 
-Requires Node.js 20 or newer. The application runtime has no npm dependencies.
+Requires Node.js 22 LTS or newer. The application runtime has no npm dependencies.
 
 ```bash
 cp .env.example .env
@@ -23,6 +23,12 @@ npm start
 ```
 
 Open `http://127.0.0.1:8787`. The API and UI are served from the same origin. `npm run serve` starts a static preview only and does not provide the API.
+
+## Windows test release
+
+For a first local run, extract the test ZIP and launch `START-HERE-WINDOWS.ps1` with PowerShell. It creates a random local ingest token in `.env` and starts the application. Full setup, RoboForex MT5 connection and test checklist: `RELEASE-TEST-NOTES.md`.
+
+The CI workflow packages `GOLD-3Po-v0.2.0-test.zip` only after unit tests, syntax checks and Chromium UI checks pass. It also creates a SHA-256 checksum and build manifest.
 
 ## API
 
