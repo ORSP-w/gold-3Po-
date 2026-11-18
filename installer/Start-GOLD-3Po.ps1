@@ -1,5 +1,3 @@
-param([switch]$NoBrowser)
-
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 $logs = Join-Path $root "logs"
@@ -72,7 +70,7 @@ try {
         }
     }
 
-    if (-not $NoBrowser) { Start-Process $url }
+    if ($env:GOLD3PO_NO_BROWSER -ne "1") { Start-Process $url }
 } catch {
     $message = $_.Exception.Message
     try {
