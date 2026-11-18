@@ -9,7 +9,7 @@ async function refreshAnalysis(){
   const data=await response.json();
   if(data.bars?.length){
    window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
-   const mode=document.querySelector('#dataMode');if(mode)mode.textContent='ROBOFOREX MT5 · '+data.bars.length+' BARS';
+   const mode=document.querySelector('#dataMode');if(mode)mode.textContent=data.feed?.status==='online'?'ROBOFOREX MT5 · LIVE':'ROBOFOREX MT5 · HISTORY';
    const price=document.querySelector('#referencePrice');if(price)price.textContent=Number(data.bars.at(-1).c).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});const range=document.querySelector('#sessionRange');if(range){const lo=Math.min(...data.bars.map(b=>b.l)),hi=Math.max(...data.bars.map(b=>b.h));range.textContent=lo.toFixed(2)+' — '+hi.toFixed(2);}
    const count=document.querySelector('#barCount');if(count)count.textContent=data.bars.length+' BARS';
    lastAnalysisAt=Date.now();
@@ -28,6 +28,6 @@ async function refreshHealth(){
 function connectStream(){
  if(!('EventSource'in window)){paint(api,'SSE UNSUPPORTED','error');return;}
  source=new EventSource('/v1/stream');source.onopen=()=>{refreshHealth();scheduleAnalysis();};source.onerror=()=>paint(api,'RECONNECTING','warning');
- source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target)paint(target,'LIVE · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol==='XAUUSD')scheduleAnalysis();}catch{/* malformed frame ignored; health polling remains authoritative */}});
+ source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target&&!message.historical)paint(target,'LIVE · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol==='XAUUSD')scheduleAnalysis();}catch{/* malformed frame ignored; health polling remains authoritative */}});
 }
 refreshHealth();refreshAnalysis();connectStream();window.setInterval(refreshHealth,5000);
