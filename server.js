@@ -87,8 +87,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
       const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
-      const selected = events.filter(e => e.symbol === symbol && e.source === 'mt5');
-      return json(res, 200, { symbol, ...buildMarketAnalysis(selected, { intervalMs, priceStep }), feed: health().feeds.find(f => f.source === 'mt5' && f.symbol === symbol) || null });
+      const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
+      if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      const selected = events.filter(e => e.symbol === symbol && e.source === source);
+      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/replay') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
@@ -97,14 +99,18 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const from = url.searchParams.get('from'), to = url.searchParams.get('to');
       const fromMs = from ? Date.parse(from) : -Infinity, toMs = to ? Date.parse(to) : Infinity;
       if ((from && !Number.isFinite(fromMs)) || (to && !Number.isFinite(toMs)) || fromMs > toMs) return json(res, 400, { error: 'invalid_replay_range' });
-      const selected = events.filter(e => e.source === 'mt5' && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
-      return json(res, 200, { symbol, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 }) });
+      const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
+      if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+      return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 }) });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/backtest') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
       const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
-      const selected = events.filter(e => e.source === 'mt5' && e.symbol === symbol);
+      const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
+      if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 });
       const options = {
         initialEquity: Number(url.searchParams.get('initialEquity') || 10000),
@@ -117,18 +123,20 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         feePerUnit: Number(url.searchParams.get('feePerUnit') || 0),
         slippage: Number(url.searchParams.get('slippage') || 0)
       };
-      try { return json(res, 200, { symbol, bars: analysis.bars.length, ...runBacktest(analysis.bars, options) }); }
+      try { return json(res, 200, { symbol, source, bars: analysis.bars.length, ...runBacktest(analysis.bars, options) }); }
       catch (error) { return json(res, 422, { error: 'invalid_backtest', message: error.message }); }
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/signals') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
-      const selected = events.filter(e => e.source === 'mt5' && e.symbol === symbol);
+      const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
+      if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
+      const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000 });
       const signals = generateSignals(analysis.bars);
       const simulation = runBacktest(analysis.bars);
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
-      return json(res, 200, { symbol, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Technical scores are rule-based evidence weights, not probabilities. Probability is withheld until 30 prior same-direction trades have closed.' });
+      return json(res, 200, { symbol, source, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Technical scores are rule-based evidence weights, not probabilities. Probability is withheld until 30 prior same-direction trades have closed.' });
     }
     if (req.method === 'GET' && url.pathname === '/v1/risk/plan') {
       const params = Object.fromEntries(url.searchParams.entries());
