@@ -16,11 +16,11 @@ OutputBaseFilename=GOLD-3Po-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-SetupIconFile=..\\build\\GOLD-3Po\\assets\\GOLD-3Po.ico
-WizardImageFile=..\\build\\GOLD-3Po\\assets\\WizardImage.bmp
-WizardSmallImageFile=..\\build\\GOLD-3Po\\assets\\WizardSmallImage.bmp
+SetupIconFile=..\build\GOLD-3Po\assets\GOLD-3Po.ico
+WizardImageFile=..\build\GOLD-3Po\assets\WizardImage.bmp
+WizardSmallImageFile=..\build\GOLD-3Po\assets\WizardSmallImage.bmp
 UninstallDisplayName=GOLD-3Po Market Lab
-UninstallDisplayIcon={app}\\assets\\GOLD-3Po.ico
+UninstallDisplayIcon={app}\assets\GOLD-3Po.ico
 Uninstallable=yes
 CloseApplications=yes
 RestartApplications=no
@@ -36,9 +36,9 @@ Name: "{app}\logs"
 Source: "..\build\GOLD-3Po\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\GOLD-3Po Market Lab"; Filename: "{app}\Launch-GOLD-3Po.vbs"; WorkingDir: "{app}"
-Name: "{autoprograms}\Stop GOLD-3Po"; Filename: "{app}\Stop-GOLD-3Po.vbs"; WorkingDir: "{app}"
-Name: "{autodesktop}\GOLD-3Po Market Lab"; Filename: "{app}\Launch-GOLD-3Po.vbs"; WorkingDir: "{app}"
+Name: "{autoprograms}\GOLD-3Po Market Lab"; Filename: "{app}\Launch-GOLD-3Po.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\GOLD-3Po.ico"
+Name: "{autoprograms}\Stop GOLD-3Po"; Filename: "{app}\Stop-GOLD-3Po.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\GOLD-3Po.ico"
+Name: "{autodesktop}\GOLD-3Po Market Lab"; Filename: "{app}\Launch-GOLD-3Po.vbs"; WorkingDir: "{app}"; IconFilename: "{app}\assets\GOLD-3Po.ico"
 
 [Run]
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\Launch-GOLD-3Po.vbs"""; Description: "Запустить GOLD-3Po"; Flags: postinstall nowait skipifsilent
