@@ -1,0 +1,131 @@
+name: Electron Windows installer
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/electron-windows.yml"
+      - "electron/**"
+      - "package.json"
+      - "README.md"
+      - "server.js"
+      - "index.html"
+      - "app.js"
+      - "styles.css"
+      - "market-*.js"
+      - "research-client.js"
+      - "strategy-engine.js"
+      - "backtest-engine.js"
+      - "risk-engine.js"
+      - "adapters/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Electron build dependencies
+        shell: pwsh
+        run: |
+          npm install --no-audit --no-fund --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "Dependency installation failed." }
+
+      - name: Run unit tests and syntax checks
+        shell: pwsh
+        run: |
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw "Unit tests failed." }
+          npm run check
+          if ($LASTEXITCODE -ne 0) { throw "Syntax checks failed." }
+
+      - name: Build Windows x64 installer
+        shell: pwsh
+        run: |
+          npm run dist:win
+          if ($LASTEXITCODE -ne 0) { throw "Electron Windows installer build failed." }
+
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          if (-not $installer) { throw "Electron setup executable was not created." }
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$($installer.FullName).sha256" -Value "$hash  $($installer.Name)" -Encoding ascii
+
+          @(
+            "GOLD-3Po Market Lab Electron Windows installer",
+            "Version: 0.3.0",
+            "Commit: $env:GITHUB_SHA",
+            "Target: Windows x64",
+            "Framework: Electron",
+            "Tests: npm test and npm run check passed before packaging"
+          ) | Set-Content -LiteralPath "release\BUILD-INFO.txt" -Encoding utf8
+
+      - name: Install and smoke-test the packaged application
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem -Path release -Filter "*.exe" | Select-Object -First 1
+          $installDir = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke"
+          $installLog = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Install.log"
+          New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+
+          $install = Start-Process -FilePath $installer.FullName -ArgumentList @("/S", "/D=$installDir", "/LOG=$installLog") -PassThru
+          if (-not $install.WaitForExit(120000)) {
+            Stop-Process -Id $install.Id -Force -ErrorAction SilentlyContinue
+            throw "Electron NSIS installation timed out."
+          }
+          if ($install.ExitCode -ne 0) {
+            $tail = if (Test-Path $installLog) { (Get-Content $installLog -Tail 50) -join [Environment]::NewLine } else { "No NSIS install log." }
+            throw ("NSIS installer failed with exit code " + $install.ExitCode + [Environment]::NewLine + $tail)
+          }
+
+          $appExe = Join-Path $installDir "GOLD-3Po Market Lab.exe"
+          if (-not (Test-Path -LiteralPath $appExe)) {
+            throw "Installed Electron application executable was not found: $appExe"
+          }
+
+          $stdout = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke.stderr.log"
+          $smoke = Start-Process -FilePath $appExe -ArgumentList @("--smoke-test") -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $smoke.WaitForExit(60000)) {
+            Stop-Process -Id $smoke.Id -Force -ErrorAction SilentlyContinue
+            throw "Packaged Electron application smoke test timed out."
+          }
+
+          $out = if (Test-Path $stdout) { Get-Content $stdout -Raw } else { "" }
+          $err = if (Test-Path $stderr) { Get-Content $stderr -Raw } else { "" }
+          if ($smoke.ExitCode -ne 0 -or $out -notmatch "GOLD3PO_ELECTRON_SMOKE_OK") {
+            throw ("Packaged Electron application smoke test failed. Exit code: " + $smoke.ExitCode + [Environment]::NewLine + $out + [Environment]::NewLine + $err)
+          }
+
+          Write-Host "PASS: installer installs and the packaged Electron app starts its local API and serves the UI."
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GOLD-3Po-Electron-Windows-Setup-0.3.0
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.3.0-electron.${{ github.run_number }}
+          name: GOLD-3Po Market Lab v0.3.0 Electron
+          target_commitish: ${{ github.sha }}
+          prerelease: true
+          generate_release_notes: true
+          files: release/*
+          fail_on_unmatched_files: true

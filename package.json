@@ -1,12 +1,67 @@
 {
   "name": "gold-3po-market-lab",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
+  "main": "electron/main.js",
+  "description": "GOLD-3Po Market Lab desktop application",
   "scripts": {
     "start": "node --env-file=.env server.js",
+    "start:desktop": "electron .",
+    "dist:win": "electron-builder --win nsis --x64",
     "test": "node --test",
-    "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-client.js && node --check research-client.js && node --check market-engine.js && node --check strategy-engine.js && node --check backtest-engine.js && node --check risk-engine.js && node --check ui.browser.mjs",
+    "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-client.js && node --check research-client.js && node --check market-engine.js && node --check strategy-engine.js && node --check backtest-engine.js && node --check risk-engine.js && node --check ui.browser.mjs && node --check electron/main.js",
     "serve": "python3 -m http.server 4173"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "by.gold3po.marketlab",
+    "productName": "GOLD-3Po Market Lab",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "market-data.js",
+      "market-client.js",
+      "research-client.js",
+      "market-engine.js",
+      "strategy-engine.js",
+      "backtest-engine.js",
+      "risk-engine.js",
+      "server.js",
+      "adapters/mt5/Gold3PoBridge.mq5",
+      "adapters/mt5/README.md",
+      "adapters/comex/README.md",
+      "README.md",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "artifactName": "GOLD-3Po-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "GOLD-3Po Market Lab",
+      "installerLanguages": ["ru_RU", "en_US"]
+    }
   }
 }

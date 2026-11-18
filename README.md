@@ -10,27 +10,48 @@ GOLD-3Po is a read-only market-structure research workspace. It does not route, 
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.
 5. **Decision support:** evidence-scored liquidity-sweep signals, walk-forward historical win-rate calibration, browser alerts, position sizing and risk guardrails.
 
-## Run locally
+## Windows desktop application
 
-Requires Node.js 22 LTS or newer. The application runtime has no npm dependencies.
+The Windows desktop build uses Electron. It opens GOLD-3Po in its own application window and runs the market API locally on loopback; it does not open an external browser and does not require a separate Node.js installation.
+
+Download **GOLD-3Po-Setup-*.exe** from the latest GitHub release, run the installer, and follow the setup wizard. The installer creates Start Menu and desktop shortcuts. It is a per-user install and does not require administrator rights.
+
+On first launch, the application creates a local ingestion token and settings file. Application settings and market history are stored outside the installation directory so they survive application updates and uninstallation:
+
+- Windows settings: `%APPDATA%\GOLD-3Po Market Lab\settings.json`
+- Market archive: `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`
+
+The installer workflow runs unit tests and JavaScript syntax checks, packages the Windows x64 NSIS installer, installs it on a clean runner, starts the installed application in smoke-test mode, and publishes the installer with a SHA-256 checksum. The installer is not code-signed; Windows may show an unknown-publisher warning.
+
+## Build the desktop application
+
+Requires Node.js 22 or newer for development.
+
+```bash
+npm install
+npm test
+npm run check
+npm run start:desktop
+```
+
+Build a Windows x64 installer on Windows:
+
+```powershell
+npm install
+npm run dist:win
+```
+
+The setup executable is written to `release/\`.
+
+## Run the API without Electron
 
 ```bash
 cp .env.example .env
 # Set MARKET_INGEST_TOKEN to a random secret of at least 24 characters.
-npm test
-npm run check
 npm start
 ```
 
 Open `http://127.0.0.1:8787`. The API and UI are served from the same origin. `npm run serve` starts a static preview only and does not provide the API.
-
-## Windows installer
-
-Download the **GOLD-3Po Setup .exe** from the latest GitHub pre-release. Run it and finish the setup wizard. The installer bundles the Node.js runtime, so no separate Node.js installation, terminal commands, npm install or manual ZIP extraction is required. Administrator rights are not required.
-
-The installer creates Start Menu and desktop shortcuts. Launch **GOLD-3Po Market Lab** to start the local service and open the browser; use **Stop GOLD-3Po** to stop it. The local configuration, ingestion token and market-event archive are stored beside the installation and are preserved when the app is updated. Full MT5 connection steps and test checklist: `RELEASE-TEST-NOTES.md`.
-
-The Windows release workflow runs unit tests and JavaScript syntax checks, builds the self-contained Windows x64 installer, computes SHA-256, and publishes a GitHub pre-release. The installer is not code-signed; Windows may display an unknown-publisher warning.
 
 ## API
 
@@ -65,4 +86,4 @@ By default the API appends events to `./data/market-events.jsonl`, reloads that 
 
 ## Verification
 
-`npm test` covers the market engine, replay/backtest/risk APIs, tick idempotency and UI contracts. `npm run check` checks JavaScript syntax. The GitHub Actions quality workflow additionally launches Chromium, checks UI controls and responsive overflow, and saves screenshots. MQL5 compilation and live RoboForex validation still require MetaEditor and an authenticated MT5 terminal.
+`npm test` covers the market engine, replay/backtest/risk APIs, tick idempotency and UI contracts. `npm run check` checks JavaScript syntax, including the Electron main process. The GitHub Actions quality workflow additionally launches Chromium, checks UI controls and responsive overflow, and saves screenshots. MQL5 compilation and live RoboForex validation still require MetaEditor and an authenticated MT5 terminal.
