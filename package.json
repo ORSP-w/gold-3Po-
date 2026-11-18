@@ -69,7 +69,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "runAfterFinish": true,
+      "runAfterFinish": false,
       "deleteAppDataOnUninstall": false,
       "shortcutName": "GOLD-3Po Market Lab",
       "installerLanguages": ["ru_RU", "en_US"]
