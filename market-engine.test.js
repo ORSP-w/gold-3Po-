@@ -67,4 +67,5 @@ test('licensed COMEX trades contribute reported exchange size and aggressor side
  assert.equal(out.bars[0].bid,2);
  assert.equal(out.bars[0].volume,6);
  assert.equal(out.volumeKind,'exchange_trade_size');
+ assert.equal(out.sideClassification,'licensed_vendor_aggressor_side; unknown_when_unavailable');
 });
