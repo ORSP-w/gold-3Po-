@@ -3,11 +3,17 @@ const floorTime = (ms, interval) => Math.floor(ms / interval) * interval;
 
 export function normalizeTick(input) {
   const time = Date.parse(input.timestamp);
-  if (!Number.isFinite(time) || !finite(input.bid) || !finite(input.ask) || input.bid <= 0 || input.ask < input.bid) throw new TypeError('Invalid tick timestamp or quote');
-  const last = finite(input.last) && input.last > 0 ? input.last : (input.bid + input.ask) / 2;
+  if (!Number.isFinite(time)) throw new TypeError('Invalid tick timestamp');
+  const source = input.source || 'mt5';
   const direction = ['buy','sell','unknown'].includes(input.aggressorSide) ? input.aggressorSide : 'unknown';
+  if (input.type === 'trade' || source === 'comex') {
+    if (!finite(input.price) || input.price <= 0 || !finite(input.size) || input.size <= 0) throw new TypeError('Invalid exchange trade price or size');
+    return { timestamp:new Date(time).toISOString(), time, bid:null, ask:null, last:input.price, volume:input.size, direction, source, symbol:String(input.symbol||'GC').toUpperCase(), type:'trade' };
+  }
+  if (!finite(input.bid) || !finite(input.ask) || input.bid <= 0 || input.ask < input.bid) throw new TypeError('Invalid tick quote');
+  const last = finite(input.last) && input.last > 0 ? input.last : (input.bid + input.ask) / 2;
   const volume = direction !== 'unknown' ? (finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1) : 1;
-  return { timestamp: new Date(time).toISOString(), time, bid: input.bid, ask: input.ask, last, volume, direction, source: input.source || 'mt5', symbol: String(input.symbol || 'XAUUSD').toUpperCase() };
+  return { timestamp:new Date(time).toISOString(), time, bid:input.bid, ask:input.ask, last, volume, direction, source, symbol:String(input.symbol||'XAUUSD').toUpperCase(), type:'quote' };
 }
 
 export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000 } = {}) {
@@ -62,7 +68,7 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
   });
   const zones = detectLiquidityZones(result, priceStep);
-  return { bars:result, zones, tickCount:ticks.length, volumeKind:'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
+  return { bars:result, zones, tickCount:ticks.length, volumeKind:ticks.some(t=>t.source==='comex')?'exchange_trade_size':'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:'only_explicit_aggressor_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
 }
 
 export function detectLiquidityZones(bars, priceStep = 0.1) {
