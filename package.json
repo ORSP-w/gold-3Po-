@@ -87,7 +87,8 @@
             "x64"
           ]
         }
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "artifactName": "GOLD-3Po-Setup-${version}-${arch}.${ext}",
     "nsis": {
@@ -103,7 +104,9 @@
       "installerLanguages": [
         "ru_RU",
         "en_US"
-      ]
+      ],
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }
