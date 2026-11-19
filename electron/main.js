@@ -191,7 +191,40 @@ function createTray() {
   }
 }
 
-function createMainWindow() {
+const SPLASH_MIN_MS = 2200;
+let splashWindow = null;
+
+function showSplash() {
+  const splash = new BrowserWindow({
+    width: 480,
+    height: 560,
+    frame: false,
+    resizable: false,
+    movable: true,
+    transparent: false,
+    backgroundColor: '#050505',
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    icon: appIconPath,
+    title: 'GOLD-3Po',
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  splash.once('ready-to-show', () => splash.show());
+  splash.on('closed', () => { if (splashWindow === splash) splashWindow = null; });
+  splash.loadFile(fileURLToPath(new URL('./splash.html', import.meta.url))).catch(logError);
+  splashWindow = splash;
+  return Date.now();
+}
+
+function closeSplash(startedAt) {
+  const splash = splashWindow;
+  if (!splash || splash.isDestroyed()) return;
+  const wait = Math.max(0, SPLASH_MIN_MS - (Date.now() - startedAt));
+  setTimeout(() => { if (!splash.isDestroyed()) splash.close(); }, wait);
+}
+
+function createMainWindow(splashStartedAt) {
   const window = new BrowserWindow({
     width: 1480,
     height: 980,
@@ -245,6 +278,7 @@ function createMainWindow() {
 
   window.once('ready-to-show', () => {
     if (showOnReady && !isQuitting) window.show();
+    closeSplash(splashStartedAt);
   });
   window.on('closed', () => {
     if (mainWindow === window) mainWindow = null;
@@ -306,9 +340,10 @@ async function bootstrap() {
     return;
   }
 
+  const splashStartedAt = showSplash();
   registerMt5Ipc();
   createTray();
-  await createMainWindow();
+  await createMainWindow(splashStartedAt);
 }
 
 function handleStartupFailure(error) {

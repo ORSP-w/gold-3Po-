@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8"><title>GOLD-3Po</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'">
+<style>
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:#050505;color:#fff;font-family:'Segoe UI',system-ui,sans-serif;overflow:hidden;-webkit-app-region:drag;user-select:none}
+body{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;background:radial-gradient(circle at 50% 38%,rgba(255,199,153,.20),transparent 58%),#050505;border:1px solid rgba(255,199,153,.28)}
+.head{width:300px;height:300px;border-radius:50%;object-fit:cover;box-shadow:0 0 0 1px rgba(255,199,153,.45),0 0 70px rgba(255,190,90,.35),0 0 140px rgba(255,170,60,.15);animation:float 4s ease-in-out infinite,fade .9s ease both}
+h1{font-size:26px;font-weight:800;letter-spacing:.22em;color:#ffc799;text-indent:.22em}
+p{font-size:11px;letter-spacing:.18em;color:#a0a0a0;text-transform:uppercase}
+.bar{width:220px;height:3px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.bar i{display:block;width:40%;height:100%;border-radius:3px;background:linear-gradient(90deg,transparent,#ffc799,transparent);animation:run 1.4s ease-in-out infinite}
+@keyframes run{from{transform:translateX(-120%)}to{transform:translateX(320%)}}
+@keyframes float{50%{transform:translateY(-6px)}}
+@keyframes fade{from{opacity:0;transform:scale(.94)}}
+</style></head>
+<body><img class="head" src="../c3po.png" alt="C-3PO"><h1>GOLD-3Po</h1><p>Market Lab · запуск</p><div class="bar"><i></i></div></body></html>

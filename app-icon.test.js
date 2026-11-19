@@ -25,3 +25,13 @@ test('C-3PO icon is a valid multi-size Windows ICO', () => {
   assert.equal(iconBytes.readUInt16LE(2), 1);
   assert.ok(iconBytes.readUInt16LE(4) >= 3);
 });
+
+test('C-3PO head is the startup splash and ships with the app', async () => {
+  const splash = await readFile(new URL('./electron/splash.html', import.meta.url), 'utf8');
+  const head = await readFile(new URL('./c3po.png', import.meta.url));
+  assert.match(splash, /src="\.\.\/c3po\.png"/);
+  assert.equal(head.subarray(1, 4).toString(), 'PNG');
+  assert.ok(pkg.build.files.includes('c3po.png'));
+  assert.match(mainSource, /splash\.html/);
+  assert.match(mainSource, /closeSplash\(splashStartedAt\)/);
+});
