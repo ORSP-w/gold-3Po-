@@ -16,6 +16,7 @@ function fillFields(definition) {
   if ($('condSessionFrom')) $('condSessionFrom').value = s.sessionHoursUTC ? String(s.sessionHoursUTC[0]) : '';
   if ($('condSessionTo')) $('condSessionTo').value = s.sessionHoursUTC ? String(s.sessionHoursUTC[1]) : '';
   if ($('condMinAtr')) $('condMinAtr').value = String(s.minAtr);
+  if ($('condMaxZones')) $('condMaxZones').value = String(s.maxZones ?? 8);
   if ($('condStopAtr')) $('condStopAtr').value = String(b.stopAtr);
   if ($('condTargetR')) $('condTargetR').value = String(b.targetR);
   if ($('condMaxBars')) $('condMaxBars').value = String(b.maxBars);
@@ -38,7 +39,8 @@ function collectDefinition() {
       requireDeltaAgree: Boolean($('condDelta')?.checked),
       allowedSides: sides === 'both' ? ['long', 'short'] : [sides],
       sessionHoursUTC: session,
-      minAtr: num('condMinAtr', 0)
+      minAtr: num('condMinAtr', 0),
+      maxZones: Math.round(num('condMaxZones', 8))
     },
     backtest: {
       stopAtr: num('condStopAtr', 1.5),

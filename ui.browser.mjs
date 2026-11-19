@@ -105,6 +105,7 @@ try {
   // Vespera-style setup library: save, apply and verify the active conditions propagate.
   await page.locator('#setupName').fill('Browser strict');
   await page.locator('#condStacked').check();
+  await page.locator('#condMaxZones').fill('3');
   await page.locator('#saveSetup').click();
   await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Saved Browser strict'), null, { timeout:5000 });
   await page.locator('#setupSelect').selectOption({ index: 1 });
@@ -113,6 +114,7 @@ try {
   const setupsState = await (await fetch(base + '/v1/setups')).json();
   assert.ok(setupsState.activeId, 'a setup must be active after Apply');
   assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
+  assert.equal(setupsState.activeDefinition.strategy.maxZones, 3, 'zone count setting must persist server-side');
   assert.match(await page.locator('#licenseStatus').innerText(), /NOT REQUIRED/, 'licence row must reflect the CI dev mode');
 
   // MT5 connection dialog exists and degrades safely outside Electron (no bridge).

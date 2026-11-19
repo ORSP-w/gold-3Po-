@@ -36,7 +36,7 @@ test('licence gate and setup library controls are wired',async()=>{
   for(const id of ['activateLicense','copyMachineId'])assert.ok(licenseClient.includes("$('#"+id+"')?.addEventListener")||licenseClient.includes("document.querySelector('#"+id+"')?.addEventListener"),'Licence control has no handler: '+id);
   assert.match(licenseClient,/\/v1\/license\/status/);
   assert.match(licenseClient,/\/v1\/license\/activate/);
-  for(const id of ['setupSelect','setupName','saveSetup','applySetup','exportSetup','importSetup','importSetupFile','setupStatus','condMinScore','condRejection','condStacked'])assert.ok(html.includes('id="'+id+'"'),'Missing setup target '+id);
+  for(const id of ['setupSelect','setupName','saveSetup','applySetup','exportSetup','importSetup','importSetupFile','setupStatus','condMinScore','condRejection','condStacked','condMaxZones'])assert.ok(html.includes('id="'+id+'"'),'Missing setup target '+id);
   for(const id of ['saveSetup','applySetup','exportSetup','importSetup','importSetupFile'])assert.ok(setupsClient.includes("$('"+id+"')?.addEventListener"),'Setup control has no handler: '+id);
   assert.match(setupsClient,/\/v1\/setups/);
   assert.match(html,/setups-client\.js/);

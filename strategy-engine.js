@@ -22,7 +22,8 @@ export const DEFAULT_STRATEGY_CONDITIONS = {
   requireDeltaAgree: false,
   allowedSides: ['long', 'short'],
   sessionHoursUTC: null,
-  minAtr: 0
+  minAtr: 0,
+  maxZones: 8
 };
 
 export function validateStrategyConditions(input = {}) {
@@ -38,6 +39,7 @@ export function validateStrategyConditions(input = {}) {
     if (!Array.isArray(c.sessionHoursUTC) || c.sessionHoursUTC.length !== 2 || !c.sessionHoursUTC.every(h => Number.isInteger(h) && h >= 0 && h <= 24) || c.sessionHoursUTC[0] >= c.sessionHoursUTC[1]) throw new TypeError('sessionHoursUTC must be null or [startHour, endHour] with 0 <= start < end <= 24');
   }
   if (!finite(c.minAtr) || c.minAtr < 0) throw new TypeError('minAtr must be a non-negative number');
+  if (!Number.isInteger(c.maxZones) || c.maxZones < 1 || c.maxZones > 20) throw new TypeError('maxZones must be an integer 1..20');
   return c;
 }
 

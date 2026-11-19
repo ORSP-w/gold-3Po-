@@ -93,6 +93,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: MAX_EVENTS, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
   }
   const server = createServer(async (req, res) => {
+   try {
     await storageReady;
     const url = new URL(req.url || '/', 'http://localhost');
     const asset = STATIC_FILES[url.pathname];
@@ -125,7 +126,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const intervalMs = rawInterval === null ? 900000 : Number(rawInterval);
       if (!Number.isInteger(intervalMs) || intervalMs < 60000 || intervalMs > 86400000) return json(res,400,{error:'invalid_interval',message:'intervalMs must be an integer between 60000 and 86400000.'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 10000 });
+      const activeZones = await setups.activeDefinition();
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 10000, maxZones: activeZones.strategy.maxZones });
       return json(res, 200, { symbol, source, intervalMs, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones: analysis.zones, generatedAt: new Date(now()).toISOString() });
     }
     if (url.pathname === '/v1/setups' || url.pathname === '/v1/setups/apply' || url.pathname === '/v1/setups/export' || url.pathname === '/v1/setups/import') {
@@ -167,7 +169,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
+      const activeAnalysis = await setups.activeDefinition();
+      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep, maxZones: activeAnalysis.strategy.maxZones }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/replay') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
@@ -180,7 +183,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
-      return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 }) });
+      const activeReplay = await setups.activeDefinition();
+      return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, maxZones: activeReplay.strategy.maxZones }) });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/backtest') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
@@ -190,8 +194,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000 });
       const active = await setups.activeDefinition();
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, maxZones: active.strategy.maxZones });
       const options = {
         initialEquity: Number(url.searchParams.get('initialEquity') || 10000),
         riskPct: Number(url.searchParams.get('riskPct') || active.backtest.riskPct),
@@ -216,8 +220,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000 });
       const active = await setups.activeDefinition();
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, maxZones: active.strategy.maxZones });
       const signals = generateSignals(analysis.bars, active.strategy);
       const simulation = runBacktest(analysis.bars, { ...active.backtest, minScore: active.strategy.minScore, atrPeriod: active.strategy.atrPeriod, strategyConditions: active.strategy });
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
@@ -326,6 +330,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       for (const client of clients) client.write(packet);
       return json(res, 202, { accepted: true, event: stored });
     } catch (error) { return json(res, error.status || 400, { error: error.status === 422 ? 'invalid_event' : 'invalid_request', message: error.message }); }
+   } catch (error) {
+    if (!res.headersSent) json(res, 500, { error: 'internal_error', message: error instanceof Error ? error.message : String(error) });
+    else res.end();
+   }
   });
   return { server, health };
 }

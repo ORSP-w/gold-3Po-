@@ -16,7 +16,7 @@ export function normalizeTick(input) {
   return { timestamp:new Date(time).toISOString(), time, bid:input.bid, ask:input.ask, last, volume, direction, source, symbol:String(input.symbol||'XAUUSD').toUpperCase(), type:'quote' };
 }
 
-export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000 } = {}) {
+export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000, maxZones = 8 } = {}) {
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
   const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-1000000);
   const bars = new Map();
@@ -67,12 +67,13 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     const exhaustion=directionalKnown&&total>=3&&Math.abs(delta)/total>=0.7&&range<=priceStep*5;
     return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
   });
-  const zones = detectLiquidityZones(result, priceStep);
+  const zones = detectLiquidityZones(result, priceStep, maxZones);
   return { bars:result, zones, tickCount:ticks.length, volumeKind:ticks.some(t=>t.source==='comex')?'exchange_trade_size':'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:ticks.length&&ticks.every(t=>t.source==='comex')?'licensed_vendor_aggressor_side; unknown_when_unavailable':'only_explicit_mt5_tick_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
 }
 
-export function detectLiquidityZones(bars, priceStep = 0.1) {
+export function detectLiquidityZones(bars, priceStep = 0.1, maxZones = 8) {
   if (!Array.isArray(bars) || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid liquidity input');
+  const cap = Number.isInteger(maxZones) && maxZones >= 1 && maxZones <= 20 ? maxZones : 8;
   if (bars.length < 6) return [];
   // The newest bar may still be forming: pivots are confirmed only by closed bars.
   const closed = bars.slice(0, -1);
@@ -121,5 +122,5 @@ export function detectLiquidityZones(bars, priceStep = 0.1) {
       state, formedAt: closed[formedAt].time ?? null, touches: g.indices.length
     });
   }
-  return zones.sort((a, b) => b.strength - a.strength).slice(0, 8);
+  return zones.sort((a, b) => b.strength - a.strength).slice(0, cap);
 }

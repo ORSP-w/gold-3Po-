@@ -12,7 +12,7 @@ export function snapshotPath(commonDataPath, symbol) {
 export function encodeSnapshot(symbol, zones, now = Date.now()) {
   const rows = zones.filter(z => /^[A-Za-z0-9._-]{1,40}$/.test(z.id) && ['buy', 'sell'].includes(z.side)
     && [z.low, z.high, z.strength].every(Number.isFinite) && z.low > 0 && z.high > z.low && z.strength >= 0 && z.strength <= 1)
-    .slice(0, 8).map(z => [z.id, `${z.side}-side`, z.low, z.high, z.strength, (String(z.state ?? '').toUpperCase().replace(/[^A-Z _-]/g, '').trim().slice(0, 32)) || 'UNTESTED'].join(','));
+    .slice(0, 20).map(z => [z.id, `${z.side}-side`, z.low, z.high, z.strength, (String(z.state ?? '').toUpperCase().replace(/[^A-Z _-]/g, '').trim().slice(0, 32)) || 'UNTESTED'].join(','));
   return [`G3P1,${Math.floor(now / 1000)},${symbol},${rows.length}`, ...rows, 'END', ''].join('\r\n');
 }
 

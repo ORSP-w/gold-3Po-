@@ -7,10 +7,11 @@
 input string InpBrokerSymbol = "";   // Blank uses the current chart symbol
 input int    InpPollSeconds = 2;     // Timer interval (seconds)
 input int    InpStaleSeconds = 180;  // Maximum snapshot age (seconds)
+input int    InpMaxZones = 8;        // Maximum zones to draw (1..20)
 input color  InpBuySideColor = clrDeepSkyBlue;
 input color  InpSellSideColor = clrTomato;
 
-#define G3P_MAX_ZONES 8
+#define G3P_MAX_ZONES 20
 #define G3P_MAX_BYTES 16384
 #define G3P_FUTURE_TOLERANCE 30
 
@@ -205,7 +206,7 @@ bool ReadSnapshot(GoldZone &zones[], int &count, long &stamp, string &status)
    long parsed_count;
    if(StringSplit(lines[0], ',', fields) != 4 || fields[0] != "G3P1" ||
       !UnsignedDecimal(fields[1], 12, stamp) || stamp <= 0 ||
-      !UnsignedDecimal(fields[3], 2, parsed_count) || parsed_count > G3P_MAX_ZONES)
+      !UnsignedDecimal(fields[3], 2, parsed_count) || parsed_count > InpMaxZones)
    {
       status = "Invalid snapshot header";
       return false;
@@ -425,9 +426,9 @@ void OnTimer()
 
 int OnInit()
 {
-   if(InpPollSeconds < 1 || InpStaleSeconds < 1)
+   if(InpPollSeconds < 1 || InpStaleSeconds < 1 || InpMaxZones < 1 || InpMaxZones > G3P_MAX_ZONES)
    {
-      Print("Gold3Po: poll and stale intervals must be positive.");
+      Print("Gold3Po: poll/stale intervals must be positive and max zones within 1..20.");
       return INIT_PARAMETERS_INCORRECT;
    }
    g_symbol = InpBrokerSymbol == "" ? _Symbol : InpBrokerSymbol;

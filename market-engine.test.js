@@ -76,6 +76,17 @@ test('liquidity detector drops zones broken by a close through the far edge',()=
  assert.ok(!detectLiquidityZones(broken,0.1).some(z=>z.side==='buy'&&z.high<12.5),'close above the zone must consume it');
 });
 
+test('maxZones caps the number of displayed zones',()=>{
+ const highs=[9,10,12,10,9,10,12.1,10,9,10,14,12,11,12,14.1,12,11,12];
+ const bars=highs.map(h=>({h,l:h-2,o:h-1,c:h-1}));
+ const all=detectLiquidityZones(bars,0.1,20);
+ const capped=detectLiquidityZones(bars,0.1,1);
+ assert.ok(all.length>=2,'fixture should produce several zones');
+ assert.equal(capped.length,1);
+ assert.equal(capped[0].id,all[0].id,'cap must keep the strongest zone');
+ assert.deepEqual(detectLiquidityZones(bars,0.1,99),detectLiquidityZones(bars,0.1,8),'invalid cap falls back to 8');
+});
+
 test('licensed COMEX trades contribute reported exchange size and aggressor side',()=>{
  const out=buildMarketAnalysis([
   {type:'trade',source:'comex',symbol:'GCZ6',timestamp:'2026-11-17T10:01:00.000Z',price:2650,size:4,aggressorSide:'buy'},

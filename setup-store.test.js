@@ -21,6 +21,9 @@ test('definition validation rejects unknown fields and out-of-range values', () 
   assert.throws(() => validateDefinition({ backtest: { riskPct: 0.9, maxRiskPct: 0.5 } }), /must not exceed/);
   assert.throws(() => validateDefinition({ strategy: { sessionHoursUTC: [16, 7] } }), /sessionHoursUTC/);
   assert.throws(() => validateDefinition({ strategy: { allowedSides: [] } }), /allowedSides/);
+  assert.throws(() => validateDefinition({ strategy: { maxZones: 0 } }), /maxZones/);
+  assert.throws(() => validateDefinition({ strategy: { maxZones: 21 } }), /maxZones/);
+  assert.equal(validateDefinition({ strategy: { maxZones: 12 } }).strategy.maxZones, 12);
   const ok = validateDefinition(sampleDefinition);
   assert.equal(ok.strategy.minScore, 0.6);
   assert.equal(ok.backtest.stopAtr, 2);

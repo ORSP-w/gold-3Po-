@@ -1,4 +1,4 @@
-# GOLD-3Po v0.5.0 — Electron Windows installer test
+# GOLD-3Po v0.6.0 — Electron Windows installer test
 
 ## Install and launch
 
@@ -16,6 +16,8 @@ The application bundles Electron and its Chromium runtime. A separate Node.js in
 3. Press **Скопировать индикатор в MT5**, compile `Gold3PoLevels.mq5` if MetaEditor did not auto-compile, and attach it to the gold chart. Levels must appear and refresh; disconnecting must clear them within the indicator stale timeout.
 4. Minimize and close the window: the app must stay in the tray and keep the API alive; tray **Exit** must stop it.
 5. Verify no order is ever sent: the connector exposes no trading operations.
+6. Glass design: panels, buttons and dialogs render with the Vespera-style translucent glass surfaces; all controls remain clickable at desktop and mobile widths.
+7. Zone count: set «Зон отображать» (1–20) in Custom conditions, save and apply; the chart, `/v1/chart/zones` and the MT5 indicator must respect the limit.
 
 Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local market archive is stored in `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`. The licence key and clock watermark are stored in `license.json` / `license-state.json` in the same folder. These files are outside the installation folder and are retained when the application is updated or uninstalled.
 
