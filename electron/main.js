@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createMarketServer } from '../server.js';
 import { createLicenseManager } from '../license.js';
 import { createSetupStore } from '../setup-store.js';
+import { createSettingsStore } from '../settings-store.js';
 
 app.setName('GOLD-3Po Market Lab');
 if (process.platform === 'win32') app.setAppUserModelId('by.gold3po.marketlab');
@@ -132,11 +133,14 @@ async function startLocalApi() {
     stateFile: path.join(userDataPath, 'license-state.json')
   });
   const setupStore = createSetupStore({ file: path.join(userDataPath, 'setups.json') });
+  // Zone and MT5 drawing preferences; a separate file so the app's own settings.json (token, port) is never overwritten.
+  const settingsStore = createSettingsStore({ file: path.join(userDataPath, 'zone-settings.json') });
   marketServer = createMarketServer({
     token: settings.marketIngestToken,
     storageFile: storagePath,
     license,
-    setupStore
+    setupStore,
+    settingsStore
   }).server;
 
   const address = await listen(marketServer, port);

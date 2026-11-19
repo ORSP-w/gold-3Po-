@@ -14,8 +14,11 @@ input bool DrawZones = true;
 input string ZonesUrl = "http://127.0.0.1:8787/v1/chart/zones";
 input int ZonesRefreshSeconds = 5;
 input int ZoneLookbackBars = 200;
-input color BuyZoneColor = clrTeal;
-input color SellZoneColor = clrIndianRed;
+input bool UseAppStyle = true;            // colours / line style from GOLD-3Po settings
+input color BuyZoneColor = clrRed;         // zones above price (when UseAppStyle=false)
+input color SellZoneColor = clrRed;        // zones below price (when UseAppStyle=false)
+input ENUM_LINE_STYLE ZoneLineStyle = STYLE_SOLID;
+input int ZoneLineWidth = 2;
 
 ulong sequenceNumber = 0;
 string sequenceKey = "";
@@ -321,6 +324,59 @@ double JsonNumberField(const string obj, const string key)
    return StringToDouble(StringSubstr(obj, start, end - start));
 }
 
+bool JsonBoolField(const string obj, const string key, const bool fallback)
+{
+   string pattern = "\"" + key + "\":";
+   int start = StringFind(obj, pattern);
+   if(start < 0) return fallback;
+   start += StringLen(pattern);
+   if(StringSubstr(obj, start, 4) == "true") return true;
+   if(StringSubstr(obj, start, 5) == "false") return false;
+   return fallback;
+}
+
+int HexNibble(const ushort c)
+{
+   if(c >= '0' && c <= '9') return c - '0';
+   if(c >= 'A' && c <= 'F') return c - 'A' + 10;
+   if(c >= 'a' && c <= 'f') return c - 'a' + 10;
+   return -1;
+}
+
+// "#RRGGBB" -> MQL color (0x00BBGGRR); fallback when malformed.
+color HexToColor(const string text, const color fallback)
+{
+   if(StringLen(text) != 7 || StringGetCharacter(text, 0) != '#') return fallback;
+   int rgb[3];
+   for(int k = 0; k < 3; k++)
+   {
+      int hi = HexNibble(StringGetCharacter(text, 1 + k * 2));
+      int lo = HexNibble(StringGetCharacter(text, 2 + k * 2));
+      if(hi < 0 || lo < 0) return fallback;
+      rgb[k] = hi * 16 + lo;
+   }
+   return (color)(rgb[0] | (rgb[1] << 8) | (rgb[2] << 16));
+}
+
+ENUM_LINE_STYLE LineStyleFromText(const string text, const ENUM_LINE_STYLE fallback)
+{
+   if(text == "solid") return STYLE_SOLID;
+   if(text == "dash") return STYLE_DASH;
+   if(text == "dot") return STYLE_DOT;
+   if(text == "dashdot") return STYLE_DASHDOT;
+   if(text == "dashdotdot") return STYLE_DASHDOTDOT;
+   return fallback;
+}
+
+color BlendColor(const color fg, const color bg, const double share)
+{
+   uint a = (uint)fg, b = (uint)bg;
+   int r = (int)MathRound((a & 0xFF) * share + (b & 0xFF) * (1.0 - share));
+   int g = (int)MathRound(((a >> 8) & 0xFF) * share + ((b >> 8) & 0xFF) * (1.0 - share));
+   int bl = (int)MathRound(((a >> 16) & 0xFF) * share + ((b >> 16) & 0xFF) * (1.0 - share));
+   return (color)(r | (g << 8) | (bl << 16));
+}
+
 void DeleteZoneObjects()
 {
    ObjectsDeleteAll(0, "G3P_");
@@ -367,6 +423,28 @@ void RefreshZones()
    if(zonesEnd < 0) return;
    string zonesJson = StringSubstr(response, zonesStart, zonesEnd - zonesStart);
 
+   // Drawing style: GOLD-3Po settings (red solid lines by default), or this EA's inputs.
+   color buyColor = BuyZoneColor, sellColor = SellZoneColor;
+   ENUM_LINE_STYLE lineStyle = ZoneLineStyle;
+   int lineWidth = (int)MathMax(1, MathMin(5, ZoneLineWidth));
+   bool fill = false, showLabels = true, showStrength = true;
+   int styleStart = StringFind(response, "\"style\":{");
+   if(UseAppStyle && styleStart >= 0)
+   {
+      int styleEnd = StringFind(response, "}", styleStart);
+      string styleJson = StringSubstr(response, styleStart, styleEnd - styleStart + 1);
+      buyColor = HexToColor(JsonStringField(styleJson, "buyColor"), buyColor);
+      sellColor = HexToColor(JsonStringField(styleJson, "sellColor"), sellColor);
+      lineStyle = LineStyleFromText(JsonStringField(styleJson, "lineStyle"), lineStyle);
+      double w = JsonNumberField(styleJson, "lineWidth");
+      if(w != EMPTY_VALUE && w >= 1 && w <= 5) lineWidth = (int)w;
+      fill = JsonBoolField(styleJson, "fill", fill);
+      showLabels = JsonBoolField(styleJson, "showLabels", showLabels);
+      showStrength = JsonBoolField(styleJson, "showStrength", showStrength);
+   }
+   if(lineStyle != STYLE_SOLID) lineWidth = 1; // MT5 draws dashes only at width 1
+   color background = (color)ChartGetInteger(0, CHART_COLOR_BACKGROUND);
+
    DeleteZoneObjects();
    zonesDrawnCount = 0;
    int buyCount = 0, sellCount = 0;
@@ -393,25 +471,44 @@ void RefreshZones()
       double strength = JsonNumberField(obj, "strength");
       string distance = JsonStringField(obj, "distance");
       string state = JsonStringField(obj, "state");
+      string label = JsonStringField(obj, "label");
       if(id == "" || low == EMPTY_VALUE || high == EMPTY_VALUE || high <= low) continue;
 
-      color zoneColor = (side == "buy") ? BuyZoneColor : SellZoneColor;
+      color zoneColor = (side == "buy") ? buyColor : sellColor;
       string rectName = "G3P_ZONE_" + id;
       if(ObjectCreate(0, rectName, OBJ_RECTANGLE, 0, timeLeft, low, timeRight, high))
       {
-         ObjectSetInteger(0, rectName, OBJPROP_COLOR, zoneColor);
-         ObjectSetInteger(0, rectName, OBJPROP_STYLE, STYLE_SOLID);
-         ObjectSetInteger(0, rectName, OBJPROP_WIDTH, 1);
-         ObjectSetInteger(0, rectName, OBJPROP_FILL, false);
+         ObjectSetInteger(0, rectName, OBJPROP_COLOR, fill ? BlendColor(zoneColor, background, 0.22) : zoneColor);
+         ObjectSetInteger(0, rectName, OBJPROP_STYLE, lineStyle);
+         ObjectSetInteger(0, rectName, OBJPROP_WIDTH, lineWidth);
+         ObjectSetInteger(0, rectName, OBJPROP_FILL, fill);
          ObjectSetInteger(0, rectName, OBJPROP_BACK, true);
          ObjectSetInteger(0, rectName, OBJPROP_SELECTABLE, false);
          ObjectSetString(0, rectName, OBJPROP_TOOLTIP, "GOLD-3Po " + side + "-side liquidity · strength " + DoubleToString(strength, 2) + " · " + state);
       }
       string labelName = "G3P_LBL_" + id;
       double midPrice = (low + high) / 2.0;
-      if(ObjectCreate(0, labelName, OBJ_TEXT, 0, timeRight, midPrice))
+      if(fill)
       {
-         ObjectSetString(0, labelName, OBJPROP_TEXT, " " + side + " LQ " + DoubleToString(strength, 2) + " " + distance);
+         // A filled rectangle has no outline: draw the zone edges as lines on top.
+         for(int edge = 0; edge < 2; edge++)
+         {
+            string lineName = "G3P_EDGE_" + id + (edge == 0 ? "_L" : "_H");
+            double price = edge == 0 ? low : high;
+            if(ObjectCreate(0, lineName, OBJ_TREND, 0, timeLeft, price, timeRight, price))
+            {
+               ObjectSetInteger(0, lineName, OBJPROP_COLOR, zoneColor);
+               ObjectSetInteger(0, lineName, OBJPROP_STYLE, lineStyle);
+               ObjectSetInteger(0, lineName, OBJPROP_WIDTH, lineWidth);
+               ObjectSetInteger(0, lineName, OBJPROP_RAY_RIGHT, false);
+               ObjectSetInteger(0, lineName, OBJPROP_SELECTABLE, false);
+            }
+         }
+      }
+      string caption = " " + (label != "" ? label : side + " LQ") + " · " + state + (showStrength ? " · " + IntegerToString((int)MathRound(strength * 100)) + "%" : "") + " " + distance;
+      if(showLabels && ObjectCreate(0, labelName, OBJ_TEXT, 0, timeRight, midPrice))
+      {
+         ObjectSetString(0, labelName, OBJPROP_TEXT, caption);
          ObjectSetInteger(0, labelName, OBJPROP_COLOR, zoneColor);
          ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 8);
          ObjectSetString(0, labelName, OBJPROP_FONT, "Consolas");

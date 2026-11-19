@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { encodeSnapshot, snapshotPath, publishSnapshot } from './mt5-snapshot.js';
+import { encodeSnapshot, snapshotPath, publishSnapshot, normalizeStyle } from './mt5-snapshot.js';
 import { createMt5Session } from './mt5-session.js';
 
 const commonRoot = process.platform === 'win32' ? 'C:\\Common' : '/tmp/g3p-common';
@@ -11,14 +11,24 @@ const commonRoot = process.platform === 'win32' ? 'C:\\Common' : '/tmp/g3p-commo
 const zone = { id: 'LQ-buy-12.05', side: 'buy', low: 11.9, high: 12.2, strength: 0.69, state: 'UNTESTED' };
 
 test('snapshot format matches the indicator contract', () => {
-  const text = encodeSnapshot('XAUUSDm', [zone], 1795000000000);
+  const text = encodeSnapshot('XAUUSDm', [{ ...zone, label: 'Repeated swing lows · role flip' }], 1795000000000);
   const lines = text.split('\r\n');
-  assert.equal(lines[0], 'G3P1,1795000000,XAUUSDm,1');
-  assert.equal(lines[1], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,UNTESTED');
-  assert.equal(lines[2], 'END');
-  assert.equal(encodeSnapshot('XAUUSD', []).split('\r\n')[0], 'G3P1,' + Math.floor(Date.now() / 1000) + ',XAUUSD,0');
+  assert.equal(lines[0], 'G3P2,1795000000,XAUUSDm,1');
+  assert.equal(lines[1], 'STYLE,#FF0000,#FF0000,SOLID,2,0,1,1', 'default: red solid lines, width 2');
+  assert.equal(lines[2], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,UNTESTED,Repeated swing lows - role flip');
+  assert.equal(lines[3], 'END');
+  assert.equal(encodeSnapshot('XAUUSD', []).split('\r\n')[0], 'G3P2,' + Math.floor(Date.now() / 1000) + ',XAUUSD,0');
   const noState = encodeSnapshot('XAUUSD', [{ ...zone, state: undefined }]);
-  assert.ok(noState.includes(',UNTESTED\r\n'), 'missing state must default to a non-empty token');
+  assert.ok(noState.includes(',UNTESTED,Zone\r\n'), 'missing state and label default to non-empty tokens');
+});
+
+test('snapshot carries the drawing style from the app settings', () => {
+  const style = { buyColor: '#00aaff', sellColor: '#ff8800', lineStyle: 'dash', lineWidth: 4, fill: true, showLabels: false, showStrength: false };
+  assert.equal(encodeSnapshot('XAUUSD', [zone], 0, style).split('\r\n')[1], 'STYLE,#00AAFF,#FF8800,DASH,1,1,0,0', 'dashed lines are width 1 in MT5');
+  assert.equal(normalizeStyle({ buyColor: 'red', lineStyle: 'wavy', lineWidth: 99 }).buyColor, '#FF0000');
+  assert.equal(normalizeStyle({ lineStyle: 'wavy' }).lineStyle, 'solid');
+  assert.equal(normalizeStyle({ lineWidth: 99 }).lineWidth, 2);
+  assert.ok(!encodeSnapshot('XAUUSD', [{ ...zone, label: 'a,b\r\nEND' }]).includes('a,b'), 'labels cannot break the CSV');
 });
 
 test('snapshot path rejects traversal and non-gold symbols', () => {
@@ -33,7 +43,7 @@ test('publishSnapshot writes atomically into the common files folder', async () 
   try {
     await publishSnapshot(dir, 'XAUUSD.', [zone]);
     const text = await readFile(join(dir, 'Files', 'GOLD3PO', 'XAUUSD..csv'), 'utf8');
-    assert.ok(text.startsWith('G3P1,'));
+    assert.ok(text.startsWith('G3P2,'));
     assert.ok(text.includes('buy-side'));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -55,9 +65,9 @@ function fakeApi({ zones = [zone], licenseValid = () => true, failFirstLive = fa
   let liveFailures = failFirstLive ? 1 : 0;
   const request = async (url, init = {}) => {
     const path = new URL(url).pathname;
-    calls.push({ path, body: init.body ? JSON.parse(init.body) : null });
+    calls.push({ path, url: String(url), body: init.body ? JSON.parse(init.body) : null });
     if (path === '/v1/license/status') return { ok: licenseValid(), status: licenseValid() ? 200 : 402, json: async () => ({ valid: licenseValid() }) };
-    if (path === '/v1/chart/zones') return { ok: true, status: 200, json: async () => ({ zones }) };
+    if (path === '/v1/chart/zones') return { ok: true, status: 200, json: async () => ({ zones, style: { buyColor: '#FF0000', sellColor: '#FF0000', lineStyle: 'solid', lineWidth: 3, fill: false, showLabels: true, showStrength: true } }) };
     if (path.startsWith('/v1/ingest/mt5/')) {
       if (path.endsWith('live-batch') && liveFailures > 0) {
         liveFailures--;
@@ -83,7 +93,7 @@ test('session connects, ingests, publishes zones and clears them on disconnect',
       poll: { ok: true, ticks: [tick] }
     }),
     request: api.request,
-    publish: async (common, symbol, zones) => { published.push({ symbol, count: zones.length }); }
+    publish: async (common, symbol, zones, style) => { published.push({ symbol, count: zones.length, width: style?.lineWidth }); }
   });
   const state = await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
   assert.equal(state.state, 'online');
@@ -92,6 +102,9 @@ test('session connects, ingests, publishes zones and clears them on disconnect',
   assert.ok(api.calls.some(c => c.path === '/v1/ingest/mt5/history'), 'history must be ingested');
   assert.ok(api.calls.some(c => c.path === '/v1/ingest/mt5/live-batch'), 'live ticks must be ingested');
   assert.ok(published.some(p => p.symbol === 'XAUUSDM' && p.count === 1), 'zones must be published for the canonical broker symbol');
+  assert.ok(published.some(p => p.count === 1 && p.width === 3), 'the drawing style from settings must reach the snapshot');
+  const zoneCalls = api.calls.filter(c => c.path === '/v1/chart/zones');
+  assert.ok(zoneCalls.length && zoneCalls.every(c => !/intervalMs/.test(c.url)), 'timeframe comes from settings, not a hard-coded 15m');
   const offline = await session.disconnect();
   assert.equal(offline.state, 'offline');
   assert.ok(published.at(-1).count === 0, 'disconnect must clear the indicator snapshot');

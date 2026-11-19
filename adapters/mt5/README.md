@@ -44,7 +44,7 @@ The 30-day history request means “up to the history available from the broker 
 
 With `DrawZones=true` (default) the EA polls `GET /v1/chart/zones?symbol=XAUUSD` every `ZonesRefreshSeconds` (default 5) and redraws the detected liquidity zones on the chart:
 
-- **Buy-side zones** (repeated swing highs above price): teal rectangles; **sell-side zones** (repeated swing lows): red rectangles. Colors are inputs (`BuyZoneColor`, `SellZoneColor`).
+- Zones above price (buy-side) and below price (sell-side) are drawn as rectangles in the colours, line style, width and fill chosen in the app (**Settings → Отрисовка в MT5**; default red solid lines). Set `UseAppStyle=false` to use the EA inputs (`BuyZoneColor`, `SellZoneColor`, `ZoneLineStyle`, `ZoneLineWidth`) instead.
 - Each rectangle spans `ZoneLookbackBars` (default 200) of history into the near future and carries a label `side LQ strength distance` plus a tooltip.
 - A status line in the top-left corner shows zone counts and the last refresh time.
 - Zones are rebuilt from the latest market analysis on every refresh, so they **follow the market**: new repeated levels appear, consumed levels disappear.

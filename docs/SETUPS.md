@@ -9,7 +9,7 @@ data or execution state — only research conditions.
 
 | Section | Fields |
 |---|---|
-| `strategy` | `minScore` (0–1), `atrPeriod` (1–200), `requireRejection`, `requireCloseEdge`, `requireStacked`, `requireDeltaAgree` (booleans), `allowedSides` (`long`/`short` subset), `sessionHoursUTC` (`null` or `[start, end)`), `minAtr` (price units), `maxZones` (1–20, how many liquidity zones to display) |
+| `strategy` | `minScore` (0–1), `atrPeriod` (1–200), `requireRejection`, `requireCloseEdge`, `requireStacked`, `requireDeltaAgree` (booleans), `allowedSides` (`long`/`short` subset), `sessionHoursUTC` (`null` or `[start, end)`), `minAtr` (price units). `maxZones` is still accepted for old exports but ignored: the zone count lives in **Settings → Zones** (`/v1/settings`) |
 | `backtest` | `stopAtr`, `targetR`, `maxBars`, `riskPct`, `maxRiskPct`, `pointValue`, `feePerUnit`, `slippage` |
 | `risk` | `maxRiskPct`, `minRiskReward` |
 

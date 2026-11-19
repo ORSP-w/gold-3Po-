@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMarketAnalysis, normalizeTick, detectLiquidityZones } from './market-engine.js';
+import { buildMarketAnalysis, normalizeTick, detectLiquidityZones, validateZoneOptions, DEFAULT_ZONE_OPTIONS } from './market-engine.js';
 
 const tick=(timestamp,last,aggressorSide='unknown',sequence=1)=>({timestamp,bid:last-0.1,ask:last+0.1,last,tickVolume:99,realVolume:5,aggressorSide,sequence,source:'mt5',symbol:'XAUUSD'});
 test('normalizer does not mistake repeated OTC quote volume for executed volume',()=>{
@@ -65,7 +65,7 @@ test('liquidity detector ignores flat bars and the forming candle',()=>{
  // A swing high confirmed only by the newest (forming) bar must not create a zone yet.
  const highs=[9,10,12,10,9,10,12.1,10,9],bars=highs.map(h=>({h,l:h-2,o:h-1,c:h-1}));
  const zones=detectLiquidityZones(bars,0.1);
- assert.ok(!zones.some(z=>z.high>12.05),'forming bar must not confirm the 12.1 pivot');
+ assert.ok(!zones.some(z=>z.side==='buy'&&z.touches>=2),'forming bar must not confirm the 12.1 pivot into a repeated-highs pool');
 });
 
 test('liquidity detector drops zones broken by a close through the far edge',()=>{
@@ -97,4 +97,77 @@ test('licensed COMEX trades contribute reported exchange size and aggressor side
  assert.equal(out.bars[0].volume,6);
  assert.equal(out.volumeKind,'exchange_trade_size');
  assert.equal(out.sideClassification,'licensed_vendor_aggressor_side; unknown_when_unavailable');
+});
+
+// Deterministic gold-like 15m series: ~$2650, ATR a few dollars, ranging swings plus noise.
+function goldBars(n=240,scale=1,seed=7){
+ let x=seed;const rnd=()=>((x=(x*1103515245+12345)%2147483648)/2147483648);
+ const out=[];let p=2650;
+ for(let i=0;i<n;i++){const o=p;p+=Math.sin(i/9)*2.2+Math.sin(i/31)*1.4+(rnd()-.5)*3;const c=p;const h=Math.max(o,c)+rnd()*1.8,l=Math.min(o,c)-rnd()*1.8;
+  out.push({time:new Date(Date.UTC(2026,0,1)+i*900000).toISOString(),o:o*scale,h:h*scale,l:l*scale,c:c*scale,volume:5+Math.round(rnd()*20)});}
+ return out;
+}
+
+test('zone finder returns 3..7 ranked reaction zones on realistic gold data',()=>{
+ const bars=goldBars(),last=bars.at(-1).c;
+ const zones=detectLiquidityZones(bars,0.1);
+ assert.ok(zones.length>=3&&zones.length<=7,`expected 3..7 zones, got ${zones.length}`);
+ assert.ok(zones.some(z=>z.low>last)&&zones.some(z=>z.high<last),'there must be levels above and below price');
+ for(let i=1;i<zones.length;i++)assert.ok(zones[i-1].strength>=zones[i].strength,'zones are ranked by strength');
+ for(const z of zones){
+  assert.ok(z.strength>=0.05&&z.strength<=0.98);assert.ok(z.high>z.low);
+  assert.ok(z.distanceAtr<=DEFAULT_ZONE_OPTIONS.maxDistanceAtr);
+  for(const v of Object.values(z.factors))assert.ok(v>=0&&v<=1,'every factor is normalised');
+ }
+ assert.equal(new Set(zones.map(z=>z.id)).size,zones.length,'ids are unique');
+ // Zones never overlap each other: a level is drawn once.
+ const sorted=[...zones].sort((a,b)=>a.low-b.low);
+ for(let i=1;i<sorted.length;i++)assert.ok(sorted[i].low>=sorted[i-1].high-1e-9,'zones must not overlap');
+});
+
+test('zone count follows the min/max settings',()=>{
+ const bars=goldBars();
+ assert.ok(detectLiquidityZones(bars,0.1,{maxZones:3}).length<=3);
+ assert.ok(detectLiquidityZones(bars,0.1,{minZones:5,maxZones:5}).length===5);
+ // A straight trend has almost no swings: the finder still offers the range extreme / volume node.
+ const trend=Array.from({length:40},(_,i)=>({o:2600+i*2,h:2601.5+i*2,l:2599.5+i*2,c:2601+i*2,volume:10}));
+ const tz=detectLiquidityZones(trend,0.1,{minZones:3,maxZones:7});
+ assert.ok(tz.length>=2,'fallback levels must appear on a one-way trend');
+ assert.ok(tz.every(z=>z.high<trend.at(-1).c||z.low>trend.at(-1).c||z.state==='NEAR PRICE'));
+});
+
+test('zone geometry is volatility-relative (same zones at any price scale)',()=>{
+ const a=detectLiquidityZones(goldBars(240,1),0.0001),b=detectLiquidityZones(goldBars(240,10),0.0001);
+ assert.equal(a.length,b.length);
+ a.forEach((z,i)=>{assert.ok(Math.abs(b[i].low/10-z.low)<1e-3*z.low);assert.equal(b[i].touches,z.touches);});
+});
+
+test('zone settings are validated',()=>{
+ assert.deepEqual(validateZoneOptions({}),{...DEFAULT_ZONE_OPTIONS});
+ assert.throws(()=>validateZoneOptions({maxZones:0}),/maxZones/);
+ assert.throws(()=>validateZoneOptions({clusterAtr:9}),/clusterAtr/);
+ assert.throws(()=>validateZoneOptions({pivotWidth:1.5}),/pivotWidth/);
+ assert.equal(validateZoneOptions({minZones:9,maxZones:4}).minZones,4,'min never exceeds max');
+});
+
+test('a broken level flips sides once and is dropped when price chops through it',()=>{
+ const mk=(h,c=h-1)=>({h,l:h-2,o:h-1,c});
+ const base=[9,10,12,10,9,10,12.1,10,9,10].map(h=>mk(h));
+ // Break up through the 12 highs and hold above: the level now sits below price as support.
+ const flipped=[...base,{h:13,l:11.5,o:11.6,c:12.9},{h:13.4,l:12.6,o:12.9,c:13.2},{h:13.5,l:12.8,o:13.2,c:13.3},{h:13.6,l:12.9,o:13.3,c:13.4}];
+ const f=detectLiquidityZones(flipped,0.1).find(z=>z.low<12.1&&z.high>12);
+ assert.ok(f,'flipped level must be kept');assert.equal(f.side,'sell');assert.equal(f.state,'FLIPPED');
+ // Then back down through it and up again: two more crosses = chop, the level is gone.
+ const chop=[...flipped,{h:13.4,l:10.5,o:13.3,c:10.8},{h:11,l:10.2,o:10.8,c:10.5},{h:13.2,l:10.4,o:10.5,c:13},{h:13.4,l:12.7,o:13,c:13.2},{h:13.5,l:12.9,o:13.2,c:13.3}];
+ assert.ok(!detectLiquidityZones(chop,0.1).some(z=>z.low<12.1&&z.high>12&&z.touches>=2),'a chopped level is not a reaction zone');
+});
+
+test('an empty side of price still gets one reference level',()=>{
+ // Range, then a straight rally with no pullback: there are no swing lows left near price.
+ const bars=[];let p=2600;
+ for(let i=0;i<60;i++){const o=p;p=2600+Math.sin(i/3)*6;bars.push({o,h:Math.max(o,p)+1,l:Math.min(o,p)-1,c:p,volume:10});}
+ for(let i=0;i<25;i++){const o=p;p+=3;bars.push({o,h:p+0.8,l:o-0.8,c:p,volume:10});}
+ const last=bars.at(-1).c,zones=detectLiquidityZones(bars,0.1,{minZones:1,maxZones:7});
+ assert.ok(zones.some(z=>z.high<last),'a level below price is offered');
+ assert.ok(zones.some(z=>z.low>last),'a level above price is offered');
 });

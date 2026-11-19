@@ -4,6 +4,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import { createMarketServer } from './server.js';
 import { createLicenseManager, issueLicenseKey } from './license.js';
 import { createSetupStore } from './setup-store.js';
+import { createSettingsStore } from './settings-store.js';
 
 function testLicense(now = () => Date.now()) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -13,7 +14,7 @@ function testLicense(now = () => Date.now()) {
 }
 
 let server; let base;
-test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }) }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
+test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }) }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
 test.afterEach(async () => { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 const auth = { authorization: 'Bearer test-secret', 'content-type': 'application/json' };
 const mt5 = (sequence=1) => ({ source:'mt5',symbol:'XAUUSD',timestamp:'2026-11-17T15:00:00.000Z',sequence,bid:2648.2,ask:2648.4,last:2648.3,tickVolume:1,realVolume:0 });
@@ -158,4 +159,37 @@ test('zones and setups endpoints are licence-gated',async()=>{
     assert.equal((await fetch(url+'/v1/setups')).status,402);
     assert.equal((await fetch(url+'/health')).status,200);
   }finally{await new Promise(resolve=>app.server.close(resolve));}
+});
+
+test('settings API: red solid lines by default, partial updates, validation and reset',async()=>{
+  let r=await fetch(base+'/v1/settings');assert.equal(r.status,200);
+  let b=await r.json();
+  assert.equal(b.mt5.buyColor,'#FF0000');assert.equal(b.mt5.sellColor,'#FF0000');assert.equal(b.mt5.lineStyle,'solid');
+  assert.equal(b.zones.minZones,3);assert.equal(b.zones.maxZones,7);
+  r=await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mt5:{lineWidth:3,sellColor:'#00ff00'},zones:{maxZones:5}})});
+  b=await r.json();assert.equal(r.status,200);
+  assert.equal(b.mt5.lineWidth,3);assert.equal(b.mt5.sellColor,'#00FF00');assert.equal(b.mt5.buyColor,'#FF0000','untouched keys keep their value');assert.equal(b.zones.maxZones,5);
+  r=await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mt5:{lineStyle:'dash'}})});
+  assert.equal((await r.json()).mt5.lineWidth,1,'MT5 draws dashed lines only at width 1');
+  for(const bad of [{mt5:{buyColor:'red'}},{zones:{maxZones:50}},{mt5:{nope:1}},{other:{}},{zones:{timeframeMinutes:7}}]){
+    r=await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(bad)});
+    assert.equal(r.status,422,JSON.stringify(bad));
+  }
+  assert.equal((await (await fetch(base+'/v1/settings')).json()).zones.maxZones,5,'a rejected update changes nothing');
+  r=await fetch(base+'/v1/settings/reset',{method:'POST'});assert.equal((await r.json()).zones.maxZones,7);
+});
+
+test('chart zones follow the settings and carry the MT5 drawing style',async()=>{
+  const start=Date.parse('2026-11-17T00:00:00.000Z');let p=2650,x=7;const rnd=()=>((x=(x*1103515245+12345)%2147483648)/2147483648);
+  const ticks=[];for(let i=0;i<2400;i++){p+=Math.sin(i/90)*0.22+Math.sin(i/310)*0.14+(rnd()-.5)*0.6;ticks.push({timestamp:new Date(start+i*90000).toISOString(),sequence:i+1,bid:+p.toFixed(2),ask:+(p+0.2).toFixed(2),last:+p.toFixed(2),tickVolume:1,realVolume:0,flags:0});}
+  for(let i=0;i<ticks.length;i+=1000)await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:auth,body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:ticks.slice(i,i+1000)})});
+  let b=await (await fetch(base+'/v1/chart/zones?symbol=XAUUSD')).json();
+  assert.equal(b.intervalMs,900000);
+  assert.ok(b.zones.length>=3&&b.zones.length<=7,'default finds 3..7 zones, got '+b.zones.length);
+  assert.equal(b.style.buyColor,'#FF0000');
+  await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({zones:{minZones:2,maxZones:3,timeframeMinutes:30},mt5:{fill:true}})});
+  b=await (await fetch(base+'/v1/chart/zones?symbol=XAUUSD')).json();
+  assert.equal(b.intervalMs,1800000,'timeframe setting drives the zone timeframe');
+  assert.ok(b.zones.length>=2&&b.zones.length<=3);
+  assert.equal(b.style.fill,true);
 });

@@ -85,20 +85,23 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
 
   async function refreshLevels(owner, changed) {
     if (session !== owner) return;
-    if (!changed && owner.cachedZones) {
+    // Refetch every ~4.5 s even without new ticks, so changed settings reach MT5 on a quiet market too.
+    if (!owner.cachedZones || Date.now() - owner.levelAt >= 4500) {
+      const response = await fetchApi('/v1/chart/zones?' + new URLSearchParams({ symbol: owner.symbol }));
+      if (response.status === 402) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
+      if (!response.ok) throw new Error(`Не удалось рассчитать уровни (HTTP ${response.status}).`);
+      const body = await response.json();
+      owner.cachedZones = body.zones;
+      owner.cachedStyle = body.style;
+    } else if (!changed) {
       const response = await fetchApi('/v1/license/status');
       if (!response.ok) throw new Error('Не удалось проверить лицензию.');
       if (!(await response.json()).valid) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
-    } else if (!owner.cachedZones || Date.now() - owner.levelAt >= 4500) {
-      const response = await fetchApi('/v1/chart/zones?' + new URLSearchParams({ symbol: owner.symbol, intervalMs: '900000' }));
-      if (response.status === 402) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
-      if (!response.ok) throw new Error(`Не удалось рассчитать уровни (HTTP ${response.status}).`);
-      owner.cachedZones = (await response.json()).zones;
     } else {
       return;
     }
     if (session !== owner) return;
-    owner.levelWrite = publish(owner.commonDataPath, owner.symbol, owner.cachedZones);
+    owner.levelWrite = publish(owner.commonDataPath, owner.symbol, owner.cachedZones, owner.cachedStyle);
     await owner.levelWrite;
     owner.levelAt = Date.now();
     owner.dirty = false;
@@ -139,7 +142,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       clearTimeout(owner.timer);
       owner.worker.stop();
       await owner.levelWrite?.catch(() => {});
-      if (owner.commonDataPath) await publish(owner.commonDataPath, owner.symbol, []).catch(() => {});
+      if (owner.commonDataPath) await publish(owner.commonDataPath, owner.symbol, [], owner.cachedStyle).catch(() => {});
     }
     if (!session) status = { state: 'offline', symbol: owner?.symbol, message };
     return state();

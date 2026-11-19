@@ -16,7 +16,7 @@ export function normalizeTick(input) {
   return { timestamp:new Date(time).toISOString(), time, bid:input.bid, ask:input.ask, last, volume, direction, source, symbol:String(input.symbol||'XAUUSD').toUpperCase(), type:'quote' };
 }
 
-export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000, maxZones = 8 } = {}) {
+export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000, maxZones, zoneOptions = {} } = {}) {
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
   const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-1000000);
   const bars = new Map();
@@ -67,60 +67,210 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     const exhaustion=directionalKnown&&total>=3&&Math.abs(delta)/total>=0.7&&range<=priceStep*5;
     return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
   });
-  const zones = detectLiquidityZones(result, priceStep, maxZones);
+  const zones = detectLiquidityZones(result, priceStep, { ...zoneOptions, ...(maxZones === undefined ? {} : { maxZones }) });
   return { bars:result, zones, tickCount:ticks.length, volumeKind:ticks.some(t=>t.source==='comex')?'exchange_trade_size':'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:ticks.length&&ticks.every(t=>t.source==='comex')?'licensed_vendor_aggressor_side; unknown_when_unavailable':'only_explicit_mt5_tick_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
 }
 
-export function detectLiquidityZones(bars, priceStep = 0.1, maxZones = 8) {
+export const DEFAULT_ZONE_OPTIONS = Object.freeze({
+  minZones: 3,          // try to always offer at least this many reaction levels
+  maxZones: 7,          // never draw more than this
+  pivotWidth: 2,        // bars on each side that must be lower/higher for a swing (1..6)
+  atrPeriod: 14,        // volatility unit for every distance below
+  clusterAtr: 0.35,     // swings closer than this many ATR form one zone
+  zoneWidthAtr: 0.15,   // minimum zone thickness in ATR
+  maxDistanceAtr: 15,   // ignore levels farther than this from the current price
+  reactionBars: 6       // bars after a swing used to measure how hard price reacted
+});
+
+export function validateZoneOptions(input = {}) {
+  const o = { ...DEFAULT_ZONE_OPTIONS };
+  for (const [key, value] of Object.entries(input || {})) if (key in o && value !== undefined && value !== null) o[key] = Number(value);
+  const int = (k, lo, hi) => { if (!Number.isInteger(o[k]) || o[k] < lo || o[k] > hi) throw new TypeError(`${k} must be an integer ${lo}..${hi}`); };
+  const num = (k, lo, hi) => { if (!finite(o[k]) || o[k] < lo || o[k] > hi) throw new TypeError(`${k} must be between ${lo} and ${hi}`); };
+  int('minZones', 1, 20); int('maxZones', 1, 20); int('pivotWidth', 1, 6); int('atrPeriod', 2, 200); int('reactionBars', 1, 50);
+  num('clusterAtr', 0.05, 3); num('zoneWidthAtr', 0.02, 2); num('maxDistanceAtr', 1, 100);
+  if (o.minZones > o.maxZones) o.minZones = o.maxZones;
+  return o;
+}
+
+function averageTrueRange(bars, period) {
+  const ranges = [];
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i], prev = bars[i - 1];
+    ranges.push(prev ? Math.max(b.h - b.l, Math.abs(b.h - prev.c), Math.abs(b.l - prev.c)) : b.h - b.l);
+  }
+  const recent = ranges.slice(-period).filter(r => r > 0);
+  return recent.length ? recent.reduce((a, b) => a + b, 0) / recent.length : 0;
+}
+
+const median = values => { const v = values.filter(finite).sort((a, b) => a - b); return v.length ? v[Math.floor(v.length / 2)] : 0; };
+
+// Reaction zones: price areas where the market has turned before and is likely to react again.
+// Every distance is measured in ATR so the same settings work on any timeframe and volatility.
+// `strength` is a 0..1 ranking score built from transparent factors; it is not a calibrated probability.
+export function detectLiquidityZones(bars, priceStep = 0.1, options = {}) {
   if (!Array.isArray(bars) || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid liquidity input');
-  const cap = Number.isInteger(maxZones) && maxZones >= 1 && maxZones <= 20 ? maxZones : 8;
+  const legacyCap = typeof options === 'number';
+  let o;
+  if (legacyCap) o = { ...DEFAULT_ZONE_OPTIONS, maxZones: Number.isInteger(options) && options >= 1 && options <= 20 ? options : DEFAULT_ZONE_OPTIONS.maxZones };
+  else {
+    const raw = { ...(options || {}) };
+    if (raw.maxZones !== undefined && !(Number.isInteger(raw.maxZones) && raw.maxZones >= 1 && raw.maxZones <= 20)) delete raw.maxZones;
+    o = validateZoneOptions(raw);
+  }
+  if (legacyCap && o.minZones > o.maxZones) o.minZones = o.maxZones;
   if (bars.length < 6) return [];
-  // The newest bar may still be forming: pivots are confirmed only by closed bars.
+  // The newest bar may still be forming: swings are confirmed only by closed bars.
   const closed = bars.slice(0, -1);
   const last = bars.at(-1).c;
+  const atr = averageTrueRange(closed, o.atrPeriod);
+  if (!(atr > 0) || !finite(last)) return [];
+  const w = o.pivotWidth;
+  const vol = b => finite(b.volume) && b.volume > 0 ? b.volume : finite(b.tickCount) && b.tickCount > 0 ? b.tickCount : 0;
+  const medVol = median(closed.map(vol));
+
   const pivots = [];
-  for (let i = 2; i < closed.length - 2; i++) {
+  for (let i = w; i < closed.length - w; i++) {
     const b = closed[i];
     if (!(b.h > b.l)) continue; // zero-range bars are not swing evidence
-    const prev = closed.slice(i - 2, i), next = closed.slice(i + 1, i + 3);
-    if (prev.every(x => b.h >= x.h) && next.every(x => b.h >= x.h) && (prev.some(x => b.h > x.h) || next.some(x => b.h > x.h))) pivots.push({ side: 'buy', price: b.h, index: i });
-    if (prev.every(x => b.l <= x.l) && next.every(x => b.l <= x.l) && (prev.some(x => b.l < x.l) || next.some(x => b.l < x.l))) pivots.push({ side: 'sell', price: b.l, index: i });
+    const prev = closed.slice(i - w, i), next = closed.slice(i + 1, i + 1 + w);
+    const around = [...prev, ...next];
+    const after = closed.slice(i + 1, i + 1 + o.reactionBars);
+    const relVol = medVol > 0 ? vol(b) / medVol : 1;
+    if (around.every(x => b.h >= x.h) && around.some(x => b.h > x.h))
+      pivots.push({ type: 'high', price: b.h, index: i, reaction: (b.h - Math.min(...after.map(x => x.l))) / atr, relVol });
+    if (around.every(x => b.l <= x.l) && around.some(x => b.l < x.l))
+      pivots.push({ type: 'low', price: b.l, index: i, reaction: (Math.max(...after.map(x => x.h)) - b.l) / atr, relVol });
   }
-  const groups = [];
-  for (const pivot of pivots.sort((a, b) => a.price - b.price)) {
-    let group = groups.find(g => g.side === pivot.side && Math.abs(g.price - pivot.price) <= priceStep * 3);
-    if (!group) { group = { side: pivot.side, prices: [], indices: [] }; groups.push(group); }
-    group.prices.push(pivot.price); group.indices.push(pivot.index);
-    group.price = group.prices.reduce((a, b) => a + b, 0) / group.prices.length;
+
+  // Cluster swings by price (highs and lows together: a broken high that later holds as support is one level).
+  const tolerance = o.clusterAtr * atr;
+  const clusters = [];
+  for (const p of pivots.sort((a, b) => a.price - b.price)) {
+    const c = clusters.at(-1);
+    if (c && p.price - c.min <= tolerance) { c.items.push(p); c.max = p.price; } // bounded span: no chaining
+    else clusters.push({ items: [p], min: p.price, max: p.price });
   }
-  const zones = [];
-  for (const g of groups) {
-    if (g.indices.length < 2) continue;
-    const low = Math.min(...g.prices) - priceStep, high = Math.max(...g.prices) + priceStep;
-    const formedAt = Math.max(...g.indices);
-    // Track what price did after the zone formed: touch, sweep, or close-through break.
-    let state = 'UNTESTED', broken = false;
-    for (let i = formedAt + 1; i < closed.length && !broken; i++) {
+
+  const pad = Math.max(priceStep, (o.zoneWidthAtr * atr) / 2);
+  const halfLife = Math.max(20, closed.length / 3);
+  const candidates = [];
+  for (const c of clusters) {
+    const items = c.items.sort((a, b) => a.index - b.index);
+    const latest = items.at(-1);
+    const low = c.min - pad, high = c.max + pad;
+    // Walk the closes after the last swing. One clean cross turns support into resistance (or back):
+    // that is a FLIPPED level and is kept. Two or more crosses mean price chops through it: dropped.
+    let pos = latest.type === 'high' ? -1 : 1, crossings = 0, state = 'UNTESTED';
+    for (let i = latest.index + 1; i < closed.length; i++) {
       const b = closed[i];
-      if (g.side === 'buy') {
-        if (b.c > high) broken = true;
-        else if (b.h >= low) state = b.h > high ? 'SWEPT' : 'TESTED';
-      } else {
-        if (b.c < low) broken = true;
-        else if (b.l <= high) state = b.l < low ? 'SWEPT' : 'TESTED';
-      }
+      const now = b.c > high ? 1 : b.c < low ? -1 : 0;
+      if (now !== 0 && now !== pos) { crossings++; pos = now; continue; }
+      if (i > latest.index + w && b.h >= low && b.l <= high) state = (pos < 0 ? b.h > high : b.l < low) ? 'SWEPT' : 'TESTED';
     }
+    const broken = crossings >= 2;
+    if (crossings === 1) state = 'FLIPPED';
+    const type = last >= (c.min + c.max) / 2 ? 'low' : 'high'; // side relative to current price
     if (broken) continue; // consumed liquidity no longer offers a reaction level
-    const distance = g.price - last;
-    if (state === 'UNTESTED' && Math.abs(distance) <= priceStep * 5) state = 'NEAR PRICE';
-    const strength = Math.min(0.98, 0.45 + g.indices.length * 0.12);
-    zones.push({
-      id: `LQ-${g.side}-${g.price.toFixed(2)}`,
-      side: g.side, low, high, strength,
-      label: g.side === 'buy' ? 'Repeated swing highs' : 'Repeated swing lows',
-      distance: (distance > 0 ? '+' : '') + distance.toFixed(2),
-      state, formedAt: closed[formedAt].time ?? null, touches: g.indices.length
-    });
+    const mid = (c.min + c.max) / 2;
+    const distanceAtr = Math.abs(mid - last) / atr;
+    if (distanceAtr > o.maxDistanceAtr) continue;
+    const touches = items.length;
+    const avgReaction = items.reduce((a, p) => a + (finite(p.reaction) ? p.reaction : 0), 0) / touches;
+    const avgVol = items.reduce((a, p) => a + p.relVol, 0) / touches;
+    const factors = {
+      touches: 1 - Math.exp(-touches / 1.5),
+      reaction: Math.min(1, avgReaction / 2),
+      recency: Math.exp(-((closed.length - 1 - latest.index) / halfLife) * Math.LN2),
+      volume: medVol > 0 ? Math.min(1, avgVol / 2) : 0.5,
+      freshness: state === 'UNTESTED' ? 1 : state === 'TESTED' ? 0.8 : state === 'FLIPPED' ? 0.75 : 0.65,
+      proximity: 1 / (1 + distanceAtr / 6)
+    };
+    const score = 0.25 * factors.touches + 0.25 * factors.reaction + 0.15 * factors.recency + 0.1 * factors.volume + 0.1 * factors.freshness + 0.15 * factors.proximity;
+    const highs = items.filter(p => p.type === 'high').length, lows = touches - highs;
+    candidates.push({ low, high, mid, type, state, touches, score, factors, distanceAtr, formedIndex: latest.index,
+      label: highs && lows ? 'Role-flip level (highs + lows)' : highs ? (touches > 1 ? 'Repeated swing highs' : 'Swing high') : (touches > 1 ? 'Repeated swing lows' : 'Swing low') });
   }
-  return zones.sort((a, b) => b.strength - a.strength).slice(0, cap);
+
+  // Keep the strongest of levels that sit on top of each other; a crowded chart hides the useful ones.
+  const minGap = Math.max(2 * tolerance, 0.5 * atr) + 2 * pad;
+  candidates.sort((a, b) => b.score - a.score || a.distanceAtr - b.distanceAtr);
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const z = candidates[i];
+    if (candidates.slice(0, i).some(k => Math.abs(k.mid - z.mid) < minGap)) candidates.splice(i, 1);
+  }
+
+  // Too few swing levels (trend or short history): fill with weaker, well-known reference levels.
+  const sideEmpty = above => !candidates.some(z => (z.mid > last) === above);
+  if (candidates.length < o.minZones || sideEmpty(true) || sideEmpty(false)) {
+    const covered = price => candidates.some(z => price >= z.low - tolerance && price <= z.high + tolerance);
+    const extra = [];
+    for (const span of [10, 50, closed.length]) {
+      const from = Math.max(0, closed.length - span);
+      let hi = -Infinity, lo = Infinity, hiI = -1, loI = -1;
+      for (let i = from; i < closed.length; i++) { if (closed[i].h > hi) { hi = closed[i].h; hiI = i; } if (closed[i].l < lo) { lo = closed[i].l; loI = i; } }
+      if (hi > last + pad) extra.push({ price: hi, type: 'high', label: `${span === closed.length ? 'Range' : span + '-bar'} high`, index: hiI, weight: 0.5 });
+      if (lo < last - pad) extra.push({ price: lo, type: 'low', label: `${span === closed.length ? 'Range' : span + '-bar'} low`, index: loI, weight: 0.5 });
+    }
+    const buckets = new Map();
+    for (const b of closed) {
+      const parts = Array.isArray(b.levels) && b.levels.length ? b.levels.map(l => [l.price, (l.bid || 0) + (l.ask || 0) + (l.unknown || 0)]) : [[(b.h + b.l + b.c) / 3, vol(b) || 1]];
+      for (const [price, v] of parts) { const k = Math.round(price / tolerance); buckets.set(k, (buckets.get(k) || 0) + v); }
+    }
+    const node = [...buckets.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (node) { const price = node[0] * tolerance; if (Math.abs(price - last) > pad * 2) extra.push({ price, type: price > last ? 'high' : 'low', label: 'Volume node', index: closed.length - 1, weight: 0.6 }); }
+    // Round numbers: a step of 1/2/5 x 10^k close to 4 ATR ($10 on 15m gold).
+    const raw = 4 * atr, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 5, 10].map(m => m * mag).find(v => v >= raw) || 10 * mag;
+    for (let k = 1; k <= 3; k++) {
+      extra.push({ price: (Math.ceil(last / step) + k - 1) * step, type: 'high', label: 'Round number', index: closed.length - 1, weight: 0.35 });
+      extra.push({ price: (Math.floor(last / step) - k + 1) * step, type: 'low', label: 'Round number', index: closed.length - 1, weight: 0.35 });
+    }
+    // Fill alternating above/below price so both directions get reference levels.
+    const above = extra.filter(e => e.price > last), below = extra.filter(e => e.price < last);
+    const order = [];
+    for (let i = 0; i < Math.max(above.length, below.length); i++) { if (above[i]) order.push(above[i]); if (below[i]) order.push(below[i]); }
+    for (const e of order) {
+      // Fill up to the minimum, and always give an empty side of price one reference level.
+      if (candidates.length >= o.minZones && !sideEmpty(e.price > last)) continue;
+      if (Math.abs(e.price - last) <= pad || covered(e.price) || candidates.some(k => Math.abs(k.mid - e.price) < minGap)) continue;
+      const distanceAtr = Math.abs(e.price - last) / atr;
+      if (distanceAtr > o.maxDistanceAtr) continue;
+      const factors = { touches: 0.3, reaction: e.weight, recency: Math.exp(-((closed.length - 1 - e.index) / halfLife) * Math.LN2), volume: e.label === 'Volume node' ? 1 : 0.5, freshness: 1, proximity: 1 / (1 + distanceAtr / 6) };
+      const score = 0.25 * factors.touches + 0.25 * factors.reaction + 0.15 * factors.recency + 0.1 * factors.volume + 0.1 * factors.freshness + 0.15 * factors.proximity;
+      candidates.push({ low: e.price - pad, high: e.price + pad, mid: e.price, type: e.type, state: 'UNTESTED', touches: 0, score: score * 0.8, factors, distanceAtr, formedIndex: e.index, label: e.label });
+    }
+  }
+
+  // Rank, then keep at least one level on each side of price when there is room.
+  const ranked = candidates.sort((a, b) => b.score - a.score || a.distanceAtr - b.distanceAtr);
+  const picked = ranked.slice(0, o.maxZones);
+  if (o.maxZones >= 3) {
+    for (const above of [true, false]) {
+      if (picked.some(z => (z.mid > last) === above)) continue;
+      const best = ranked.find(z => (z.mid > last) === above && !picked.includes(z));
+      if (!best) continue;
+      const counts = side => picked.filter(z => (z.mid > last) === side).length;
+      let drop = -1;
+      for (let i = picked.length - 1; i >= 0; i--) if ((picked[i].mid > last) !== above && counts(!above) > 1) { drop = i; break; }
+      if (picked.length < o.maxZones) picked.push(best); else if (drop >= 0) picked[drop] = best;
+    }
+    picked.sort((a, b) => b.score - a.score || a.distanceAtr - b.distanceAtr);
+  }
+
+  const seen = new Set();
+  return picked.map(z => {
+    const side = z.type === 'high' ? 'buy' : 'sell';
+    let id = `LQ-${side}-${z.mid.toFixed(2)}`;
+    for (let n = 2; seen.has(id); n++) id = `LQ-${side}-${(z.mid + n * 0.001).toFixed(2)}`;
+    seen.add(id);
+    const distance = z.mid - last;
+    const state = last >= z.low && last <= z.high ? 'AT PRICE' : z.state === 'UNTESTED' && Math.abs(distance) <= pad * 3 ? 'NEAR PRICE' : z.state;
+    return {
+      id, side, low: Number(z.low.toFixed(5)), high: Number(z.high.toFixed(5)),
+      strength: Number(Math.min(0.98, Math.max(0.05, z.score)).toFixed(2)),
+      label: z.state === 'FLIPPED' && !z.label.startsWith('Role-flip') ? `${z.label} · role flip` : z.label, distance: (distance > 0 ? '+' : '') + distance.toFixed(2), distanceAtr: Number(z.distanceAtr.toFixed(2)),
+      state, formedAt: closed[z.formedIndex]?.time ?? null, touches: z.touches,
+      factors: Object.fromEntries(Object.entries(z.factors).map(([k, v]) => [k, Number(v.toFixed(2))]))
+    };
+  });
 }
