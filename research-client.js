@@ -1,3 +1,4 @@
+import { marketSymbol } from './mt5-client.js';
 const $ = id => document.getElementById(id);
 const status = $('researchStatus');
 let replayBars = [];
@@ -37,7 +38,7 @@ async function exitReplay() {
   $('replayPosition').textContent = 'Live market view';
   window.dispatchEvent(new CustomEvent('exit-replay'));
   try {
-    const response = await fetch('/v1/market/analysis?symbol=XAUUSD&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
+    const response = await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
     const data = await response.json();
     if (!response.ok) { notify(apiError(data,'Could not refresh live data')); return; }
     if (data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
@@ -58,7 +59,7 @@ async function loadReplay() {
   $('liveView').disabled = true;
   notify('Loading historical ticks and building replay bars…');
   const from = $('replayFrom').value, to = $('replayTo').value;
-  const query = new URLSearchParams({symbol:'XAUUSD',intervalMs:'900000',priceStep:'0.1'});
+  const query = new URLSearchParams({symbol:marketSymbol(),intervalMs:'900000',priceStep:'0.1'});
   if (from) query.set('from',new Date(from).toISOString());
   if (to) query.set('to',new Date(to).toISOString());
   try {
@@ -100,9 +101,9 @@ function playReplay() {
 async function runBacktest() {
   notify('Running historical simulation…');
   const query = new URLSearchParams({
-    symbol:'XAUUSD',intervalMs:'900000',initialEquity:String(number('backtestEquity',10000)),
-    riskPct:String(number('backtestRisk',0.5)),maxRiskPct:'1',stopAtr:'1.5',targetR:'2',
-    maxBars:'20',pointValue:String(number('backtestPointValue',1))
+    symbol:marketSymbol(),intervalMs:'900000',initialEquity:String(number('backtestEquity',10000)),
+    riskPct:String(number('backtestRisk',0.5)),
+    pointValue:String(number('backtestPointValue',1))
   });
   try {
     const response = await fetch('/v1/market/backtest?'+query.toString(),{cache:'no-store'});
@@ -138,7 +139,7 @@ async function calculateRisk() {
 }
 async function refreshSignals() {
   try {
-    const response = await fetch('/v1/market/signals?symbol=XAUUSD&intervalMs=900000',{cache:'no-store'});
+    const response = await fetch('/v1/market/signals?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs=900000',{cache:'no-store'});
     if (!response.ok) return;
     const data = await response.json();
     const signal = data.latest;
@@ -178,4 +179,5 @@ window.addEventListener('market-analysis',()=>{
   signalTimer = window.setTimeout(()=>{signalTimer=null;refreshSignals();},1800);
 });
 window.addEventListener('setups-changed',()=>{refreshSignals();});
+window.addEventListener('mt5-symbol-change',()=>{if(replayBars.length)void exitReplay();refreshSignals();});
 refreshSignals();

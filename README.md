@@ -12,6 +12,7 @@ GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUU
 6. **Offline licensing:** Ed25519-signed licence keys bound to one computer, valid 1–9999 days, verified locally with no licence server; activation screen, clock-rollback protection and a vendor-side key generator. See `LICENSE-KEYS.md`.
 7. **Custom conditions (Vespera-style setup library):** named setups with append-only immutable versions, strict JSON import/export and explicit apply; conditions drive signals, backtest defaults and risk guardrails. See `docs/SETUPS.md`.
 8. **MT5 zone drawing:** the EA polls `/v1/chart/zones` and draws live liquidity-zone rectangles with labels on the MT5 chart, refreshed as the market evolves. Data-only, never trades.
+9. **MT5 connection from the app:** sign in to your broker terminal (account/server/password, investor password recommended) from the GOLD-3Po window; the bundled standalone connector receives gold ticks and publishes dynamic levels to the separate `Gold3PoLevels` MT5 indicator via Common Files. The app minimizes to the tray and keeps streaming. See `docs/MT5-CONNECT.md`.
 
 ## Windows desktop application
 

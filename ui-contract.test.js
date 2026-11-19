@@ -41,3 +41,22 @@ test('licence gate and setup library controls are wired',async()=>{
   assert.match(setupsClient,/\/v1\/setups/);
   assert.match(html,/setups-client\.js/);
 });
+
+test('MT5 connection dialog, tray-safe bridge and indicator installer are wired',async()=>{
+  const mt5Client=await readFile(new URL('./mt5-client.js',import.meta.url),'utf8');
+  const preload=await readFile(new URL('./electron/preload.cjs',import.meta.url),'utf8');
+  const main=await readFile(new URL('./electron/main.js',import.meta.url),'utf8');
+  for(const id of ['mt5Open','mt5Dialog','mt5Close','mt5Form','mt5Terminal','mt5Browse','mt5Connect','mt5Disconnect','mt5InstallIndicator','mt5Detail','mt5Password','marketSymbol'])assert.ok(html.includes('id="'+id+'"'),'Missing MT5 target '+id);
+  for(const id of ['mt5Open','mt5Close','mt5Browse','mt5Disconnect','mt5InstallIndicator'])assert.ok(mt5Client.includes("$('"+id+"').addEventListener"),'MT5 control has no handler: '+id);
+  assert.match(mt5Client,/mt5Form.*addEventListener\('submit'|form\.addEventListener\('submit'/s);
+  assert.match(mt5Client,/type="password"|mt5Password/);
+  for(const channel of ['mt5:state','mt5:choose-terminal','mt5:connect','mt5:disconnect','mt5:install-indicator']){
+    assert.ok(preload.includes(channel),'Preload missing '+channel);
+  }
+  assert.match(main,/ipcMain\.handle\(`mt5:\$\{name\}`/);
+  for(const name of ['state','choose-terminal','connect','disconnect','install-indicator'])assert.ok(main.includes("handle('"+name+"'"),'Main missing handler '+name);
+  assert.match(main,/sandbox: true/);
+  assert.match(main,/preload:/);
+  assert.match(main,/new URL\(frame\.url\)\.origin !== localOrigin/);
+  assert.match(html,/mt5-client\.js/);
+});

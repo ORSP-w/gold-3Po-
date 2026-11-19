@@ -12,7 +12,7 @@ import { createSetupStore } from './setup-store.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 1000000;
-const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'], '/setups-client.js': ['setups-client.js', 'text/javascript; charset=utf-8'] };
+const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'], '/setups-client.js': ['setups-client.js', 'text/javascript; charset=utf-8'], '/mt5-client.js': ['mt5-client.js', 'text/javascript; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -20,7 +20,7 @@ const validTimestamp = value => typeof value === 'string' && Number.isFinite(Dat
 // and COMEX GC futures (GC, GCZ6, …). Everything else is rejected at the ingest boundary.
 const isGoldSymbol = (source, symbol) => source === 'comex'
   ? /^GC[A-Z0-9]*$/i.test(symbol)
-  : /^XAUUSD(?:[.\-_][A-Z0-9]*)?$/i.test(symbol) || /^GOLD$/i.test(symbol);
+  : /^(?:XAUUSD|GOLD)[A-Z0-9._#+-]{0,20}$/i.test(symbol) && !symbol.includes('..');
 const goldOnly = (source, symbol) => { if (!isGoldSymbol(source, symbol)) throw Object.assign(new Error('GOLD-3Po is gold-only: accepted symbols are XAUUSD (MT5) and GC futures (COMEX).'), { status: 422 }); };
 
 function readJson(req) {
@@ -61,6 +61,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   // External clock reference: newest ingested market event timestamp (broker/exchange time).
   const feedNowMs = () => events.length ? (Date.parse(events.at(-1).timestamp) || 0) : 0;
   const dataFile = storageFile;
+  // Dedup identities are scoped per feed: brokers reuse sequence numbers across symbols.
+  const dedupeKey = (event, id) => `${event.source}:${event.symbol}:${id}`;
   const storageReady = dataFile ? (async () => {
     try {
       const raw = await readFile(dataFile, 'utf8');
@@ -70,8 +72,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           const event = JSON.parse(line);
           events.push(event);
           const eventId = event.eventId || eventFingerprint(event);
-          seenEventIds.add(eventId);
-          seenEventIds.add(eventFingerprint(event));
+          seenEventIds.add(dedupeKey(event, eventId));
+          seenEventIds.add(dedupeKey(event, eventFingerprint(event)));
           const key = event.source + ':' + event.symbol;
           if (!event.historical) {
             lastSequence.set(key, Math.max(lastSequence.get(key) || 0, event.sequence || 0));
@@ -119,10 +121,12 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
-      const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
+      const rawInterval = url.searchParams.get('intervalMs');
+      const intervalMs = rawInterval === null ? 900000 : Number(rawInterval);
+      if (!Number.isInteger(intervalMs) || intervalMs < 60000 || intervalMs > 86400000) return json(res,400,{error:'invalid_interval',message:'intervalMs must be an integer between 60000 and 86400000.'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 500 });
-      return json(res, 200, { symbol, source, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones: analysis.zones, generatedAt: new Date(now()).toISOString() });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 10000 });
+      return json(res, 200, { symbol, source, intervalMs, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones: analysis.zones, generatedAt: new Date(now()).toISOString() });
     }
     if (url.pathname === '/v1/setups' || url.pathname === '/v1/setups/apply' || url.pathname === '/v1/setups/export' || url.pathname === '/v1/setups/import') {
       try {
@@ -244,15 +248,15 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol });
           const eventId = event.eventId || eventFingerprint(event);
           const legacyId = eventFingerprint(event);
-          if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) { duplicates++; continue; }
+          if (seenEventIds.has(dedupeKey(event, eventId)) || seenEventIds.has(dedupeKey(event, legacyId))) { duplicates++; continue; }
           if (event.sequence <= sequenceCursor) return json(res, 409, { error:'sequence_not_increasing', lastAcceptedSequence:sequenceCursor });
           sequenceCursor = event.sequence;
           additions.push({ ...event, eventId, receivedAt:new Date(now()).toISOString() });
         }
         await persistMany(additions);
         for (const stored of additions) {
-          seenEventIds.add(stored.eventId);
-          seenEventIds.add(eventFingerprint(stored));
+          seenEventIds.add(dedupeKey(stored, stored.eventId));
+          seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
           const existing = feeds.get(key);
@@ -277,15 +281,15 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
             const event = normalizeMt5({ ...raw, source:'mt5', symbol:body.symbol || raw.symbol });
             const eventId = event.eventId || eventFingerprint(event);
             const legacyId = eventFingerprint(event);
-            if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) { duplicates++; continue; }
+            if (seenEventIds.has(dedupeKey(event, eventId)) || seenEventIds.has(dedupeKey(event, legacyId))) { duplicates++; continue; }
             const stored = { ...event, eventId, receivedAt:new Date(now()).toISOString(), historical:true };
             additions.push(stored);
           } catch { rejected++; }
         }
         await persistMany(additions);
         for (const stored of additions) {
-          seenEventIds.add(stored.eventId);
-          seenEventIds.add(eventFingerprint(stored));
+          seenEventIds.add(dedupeKey(stored, stored.eventId));
+          seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
           const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
@@ -304,15 +308,15 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const event = normalize(await readJson(req));
       const eventId = event.eventId || eventFingerprint(event);
       const legacyId = eventFingerprint(event);
-      if (seenEventIds.has(eventId) || seenEventIds.has(legacyId)) return json(res, 409, { error: 'duplicate_event', eventId });
+      if (seenEventIds.has(dedupeKey(event, eventId)) || seenEventIds.has(dedupeKey(event, legacyId))) return json(res, 409, { error: 'duplicate_event', eventId });
       const key = event.source + ':' + event.symbol;
       const previous = lastSequence.get(key) || 0;
       if (event.sequence <= previous) return json(res, 409, { error: 'sequence_not_increasing', lastAcceptedSequence: previous });
       const receivedAt = now();
       const stored = { ...event, eventId, receivedAt: new Date(receivedAt).toISOString() };
       await persist(stored);
-      seenEventIds.add(eventId);
-      seenEventIds.add(legacyId);
+      seenEventIds.add(dedupeKey(event, eventId));
+      seenEventIds.add(dedupeKey(event, legacyId));
       lastSequence.set(key, event.sequence);
       events.push(stored);
       if (events.length > MAX_EVENTS) events.shift();
@@ -329,6 +333,6 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (!process.env.MARKET_INGEST_TOKEN) { process.stderr.write('MARKET_INGEST_TOKEN is required. Copy .env.example and set a long random token.\n'); process.exit(1); }
   const { server } = createMarketServer(); const port = Number(process.env.PORT || 8787); const host = process.env.HOST || '127.0.0.1';
-  server.listen(port, host, () => process.stdout.write('GOLD-3Po Market Data API listening on http://' + host + ':' + port + '\n'));
+  server.listen(port, host, () => process.stdout.write('GOLD-3Po Market Data API listening on http://' + host + ':' + server.address().port + '\n'));
   const stop = () => server.close(() => process.exit(0)); process.on('SIGINT', stop); process.on('SIGTERM', stop);
 }

@@ -1,21 +1,74 @@
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron';
+import { fileURLToPath } from 'node:url';
+import { createMt5Session } from './mt5-session.js';
+import { installIndicator } from './mt5-indicator.js';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createMarketServer } from '../server.js';
 import { createLicenseManager } from '../license.js';
 import { createSetupStore } from '../setup-store.js';
 
 app.setName('GOLD-3Po Market Lab');
-app.setPath('userData', path.join(app.getPath('appData'), 'GOLD-3Po Market Lab'));
+const userDataPath = path.join(app.getPath('appData'), app.getName());
+app.setPath('userData', userDataPath);
 
 const isSmokeTest = process.argv.includes('--smoke-test');
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const trayIconDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAADFBMVEUAAAAYEwzzu0n/0Gh5odbeAAAAAXRSTlMAQObYZgAAAFpJREFUeNq100sKACAIBcDM+985AqHEb2JvVTgLKR0jmSniV7nZZxA5Qi0TIQBgiRSw6yQeAF4pAOTRgdtDH2Bd/AHs0g/EW/Z+Vmmk8kMbjH24OPHqxcvrZQHNMgVL5iTAZQAAAABJRU5ErkJggg==';
 
 let mainWindow = null;
+let tray = null;
 let marketServer = null;
 let localOrigin = null;
+let apiStartup = null;
 let isClosingServer = false;
+let isQuitting = false;
+let quitReady = false;
+let mt5;
+let mt5TerminalPath;
+let marketIngestToken;
+const adapterDir = app.isPackaged ? path.join(process.resourcesPath, 'adapters', 'mt5') : fileURLToPath(new URL('../adapters/mt5/', import.meta.url));
+
+function registerMt5Ipc() {
+  mt5 = createMt5Session({
+    workerCommand: app.isPackaged ? path.join(process.resourcesPath, 'mt5-runtime', 'gold3po-mt5.exe') : 'py.exe',
+    workerArgs: app.isPackaged ? [] : ['-3.10', path.join(adapterDir, 'mt5_connector.py')],
+    apiOrigin: localOrigin,
+    token: marketIngestToken
+  });
+  const handle = (name, callback) => ipcMain.handle(`mt5:${name}`, (event, value) => {
+    const frame = event.senderFrame;
+    if (isQuitting || event.sender !== mainWindow?.webContents || !frame || frame.parent || new URL(frame.url).origin !== localOrigin) {
+      throw new Error('Запрос MT5 отклонён.');
+    }
+    return callback(value);
+  });
+  handle('state', () => mt5.state());
+  handle('choose-terminal', async () => {
+    if (mt5.state().state !== 'offline') return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Выберите terminal64.exe вашего брокера', properties: ['openFile'], filters: [{ name: 'Терминал MetaTrader 5', extensions: ['exe'] }]
+    });
+    if (canceled) return null;
+    if (path.basename(filePaths[0]).toLowerCase() !== 'terminal64.exe') throw new Error('Выберите terminal64.exe из папки MetaTrader 5.');
+    mt5TerminalPath = filePaths[0];
+    return mt5TerminalPath;
+  });
+  handle('connect', async input => {
+    if (!mt5TerminalPath || input?.terminalPath !== mt5TerminalPath) throw new Error('Сначала выберите терминал кнопкой «Выбрать…».');
+    const response = await fetch(`${localOrigin}/v1/license/status`, { signal: AbortSignal.timeout(5000) });
+    if (!response.ok || !(await response.json()).valid) throw new Error('Сначала активируйте лицензию GOLD-3Po.');
+    if (isQuitting) throw new Error('Приложение завершает работу.');
+    return mt5.connect({ terminalPath: mt5TerminalPath, login: input.login, password: input.password, server: input.server, symbol: input.symbol?.trim() });
+  });
+  handle('disconnect', () => mt5.disconnect());
+  handle('install-indicator', () => {
+    const terminalDataPath = mt5.terminalDataPath();
+    if (!terminalDataPath) throw new Error('Сначала подключите терминал MT5.');
+    return installIndicator({ source: path.join(adapterDir, 'Gold3PoLevels.mq5'), terminalPath: mt5TerminalPath, terminalDataPath });
+  });
+}
 
 function logError(error) {
   const message = error instanceof Error ? error.stack || error.message : String(error);
@@ -61,10 +114,8 @@ function listen(server, port) {
 }
 
 async function startLocalApi() {
-  const userDataPath = app.getPath('userData');
-  await mkdir(userDataPath, { recursive: true });
-
   const settings = await readOrCreateSettings(userDataPath);
+  marketIngestToken = settings.marketIngestToken;
   const port = Number(settings.port || 8787);
   if (!Number.isInteger(port) || port < 1024 || port > 65535) {
     throw new Error('The local API port in settings.json must be between 1024 and 65535.');
@@ -104,8 +155,40 @@ async function stopLocalApi() {
   isClosingServer = false;
 }
 
+function restoreMainWindow() {
+  if (isSmokeTest || isQuitting) return;
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (localOrigin) void createMainWindow().catch(handleStartupFailure);
+    return;
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  try {
+    const icon = nativeImage.createFromDataURL(trayIconDataUrl);
+    const menu = Menu.buildFromTemplate([
+      { label: 'Open', click: restoreMainWindow },
+      { label: 'Exit', click: () => app.quit() }
+    ]);
+    tray = new Tray(icon);
+    tray.setToolTip(app.getName());
+    tray.setContextMenu(menu);
+    tray.on('double-click', restoreMainWindow);
+  } catch (error) {
+    // Keep ordinary window behavior if the desktop cannot provide a tray.
+    tray?.destroy();
+    tray = null;
+    logError(error);
+  }
+}
+
 function createMainWindow() {
-  mainWindow = new BrowserWindow({
+  const window = new BrowserWindow({
     width: 1480,
     height: 980,
     minWidth: 1040,
@@ -117,11 +200,27 @@ function createMainWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      preload: fileURLToPath(new URL('./preload.cjs', import.meta.url))
     }
   });
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  mainWindow = window;
+  let showOnReady = true;
+
+  const hideToTray = () => {
+    if (!tray || isQuitting) return false;
+    showOnReady = false;
+    window.hide();
+    return true;
+  };
+
+  window.on('minimize', hideToTray);
+  window.on('close', event => {
+    if (hideToTray()) event.preventDefault();
+  });
+
+  window.webContents.setWindowOpenHandler(({ url }) => {
     try {
       const target = new URL(url);
       if (target.protocol === 'https:') void shell.openExternal(url);
@@ -131,7 +230,7 @@ function createMainWindow() {
     return { action: 'deny' };
   });
 
-  mainWindow.webContents.on('will-navigate', (event, targetUrl) => {
+  window.webContents.on('will-navigate', (event, targetUrl) => {
     try {
       if (new URL(targetUrl).origin !== localOrigin) event.preventDefault();
     } catch {
@@ -139,14 +238,14 @@ function createMainWindow() {
     }
   });
 
-  mainWindow.once('ready-to-show', () => {
-    if (!isSmokeTest) mainWindow?.show();
+  window.once('ready-to-show', () => {
+    if (showOnReady && !isQuitting) window.show();
   });
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  window.on('closed', () => {
+    if (mainWindow === window) mainWindow = null;
   });
 
-  return mainWindow.loadURL(localOrigin);
+  return window.loadURL(localOrigin);
 }
 
 async function runSmokeTest() {
@@ -166,7 +265,7 @@ async function runSmokeTest() {
     throw new Error('The packaged application HTML is missing required workspace elements.');
   }
 
-  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/setups-client.js', '/styles.css']) {
+  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/setups-client.js', '/mt5-client.js', '/styles.css']) {
     const response = await fetch(localOrigin + asset, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Application asset ${asset} returned HTTP ${response.status}.`);
   }
@@ -184,13 +283,23 @@ async function runSmokeTest() {
 }
 
 async function bootstrap() {
-  await startLocalApi();
+  if (isQuitting) return;
+
+  apiStartup = startLocalApi();
+  try {
+    await apiStartup;
+  } finally {
+    apiStartup = null;
+  }
+  if (isQuitting) return;
 
   if (isSmokeTest) {
     await runSmokeTest();
     return;
   }
 
+  registerMt5Ipc();
+  createTray();
   await createMainWindow();
 }
 
@@ -212,33 +321,47 @@ function handleStartupFailure(error) {
   app.exit(1);
 }
 
-if (!hasSingleInstanceLock) {
-  app.quit();
-} else {
-  app.on('second-instance', () => {
-    if (!mainWindow) {
-      if (localOrigin) void createMainWindow().catch(handleStartupFailure);
-      return;
-    }
-    if (mainWindow.isMinimized()) mainWindow.restore();
-    mainWindow.focus();
-  });
+function launch() {
+  // Chromium needs this directory to acquire its process singleton on first run.
+  mkdirSync(userDataPath, { recursive: true });
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
 
-  app.whenReady().then(bootstrap).catch(handleStartupFailure);
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0 && localOrigin) {
-      void createMainWindow().catch(handleStartupFailure);
-    }
-  });
-
+  app.on('second-instance', restoreMainWindow);
+  app.on('activate', restoreMainWindow);
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit();
+    if (!tray && process.platform !== 'darwin') app.quit();
   });
 
   app.on('before-quit', event => {
-    if (!marketServer?.listening || isClosingServer) return;
+    if (quitReady) return;
     event.preventDefault();
-    void stopLocalApi().finally(() => app.quit());
+    if (isQuitting) return;
+    isQuitting = true;
+
+    // If Exit arrives during startup, close the API once its listen attempt settles.
+    void Promise.resolve(apiStartup).catch(() => {})
+      .then(() => mt5?.disconnect('Приложение завершает работу.').catch(() => {}))
+      .then(stopLocalApi).catch(logError).finally(() => {
+        quitReady = true;
+        app.quit();
+      });
   });
+
+  app.on('will-quit', () => {
+    tray?.destroy();
+    tray = null;
+  });
+
+  app.whenReady().then(bootstrap).catch(error => {
+    if (!isQuitting) handleStartupFailure(error);
+  });
+}
+
+try {
+  launch();
+} catch (error) {
+  handleStartupFailure(error);
 }

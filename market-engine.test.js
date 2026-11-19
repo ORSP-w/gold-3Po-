@@ -52,10 +52,28 @@ test('analysis calculates cumulative delta and leaves absorption unavailable wit
 });
 
 test('liquidity detector groups repeated swing highs into buy-side pools',()=>{
- const highs=[9,10,12,10,9,10,12.1,10,9],bars=highs.map((h,i)=>({h,l:h-2,o:h-1,c:h-1}));
+ const highs=[9,10,12,10,9,10,12.1,10,9,10],bars=highs.map((h,i)=>({h,l:h-2,o:h-1,c:h-1}));
  const zones=detectLiquidityZones(bars,0.1);
  assert.ok(zones.some(z=>z.side==='buy'));
  assert.ok(zones.some(z=>z.side==='buy'&&z.high>12&&z.low<12.1));
+ assert.ok(zones.every(z=>/^LQ-(buy|sell)-\d+\.\d{2}$/.test(z.id)),'zone ids must be price-stable');
+});
+
+test('liquidity detector ignores flat bars and the forming candle',()=>{
+ const flat=Array.from({length:8},()=>({h:100,l:100,o:100,c:100}));
+ assert.deepEqual(detectLiquidityZones(flat,0.1),[]);
+ // A swing high confirmed only by the newest (forming) bar must not create a zone yet.
+ const highs=[9,10,12,10,9,10,12.1,10,9],bars=highs.map(h=>({h,l:h-2,o:h-1,c:h-1}));
+ const zones=detectLiquidityZones(bars,0.1);
+ assert.ok(!zones.some(z=>z.high>12.05),'forming bar must not confirm the 12.1 pivot');
+});
+
+test('liquidity detector drops zones broken by a close through the far edge',()=>{
+ const mk=h=>({h,l:h-2,o:h-1,c:h-1});
+ const base=[9,10,12,10,9,10,12.1,10,9,10].map(mk);
+ assert.ok(detectLiquidityZones(base,0.1).some(z=>z.side==='buy'));
+ const broken=[...base,{h:13,l:11,o:11.5,c:12.8},{h:13.2,l:12.5,o:12.8,c:13}];
+ assert.ok(!detectLiquidityZones(broken,0.1).some(z=>z.side==='buy'&&z.high<12.5),'close above the zone must consume it');
 });
 
 test('licensed COMEX trades contribute reported exchange size and aggressor side',()=>{

@@ -1,4 +1,4 @@
-# GOLD-3Po v0.4.0 — Electron Windows installer test
+# GOLD-3Po v0.5.0 — Electron Windows installer test
 
 ## Install and launch
 
@@ -7,7 +7,15 @@
 3. Leave the launch option enabled or start **GOLD-3Po Market Lab** from the desktop shortcut or Start Menu.
 4. The application opens in its own Electron window. It starts its local market API on `127.0.0.1:8787`.
 
-The application bundles Electron and its Chromium runtime. A separate Node.js installation, browser window, PowerShell command or ZIP extraction is not required.
+The application bundles Electron and its Chromium runtime. A separate Node.js installation, browser window, PowerShell command or ZIP extraction is not required. The MT5 connector is bundled as a standalone executable (`resources\mt5-runtime\gold3po-mt5.exe`); a separate Python installation is not required.
+
+## MT5 connection, indicator and tray (v0.5.0)
+
+1. Activate the licence, then press **Подключить MT5**, choose the broker `terminal64.exe`, enter account/server/password (demo or investor password recommended) and the exact gold symbol.
+2. Confirm the status becomes online and the symbol label matches the broker symbol (suffixes such as `XAUUSDm` are supported).
+3. Press **Скопировать индикатор в MT5**, compile `Gold3PoLevels.mq5` if MetaEditor did not auto-compile, and attach it to the gold chart. Levels must appear and refresh; disconnecting must clear them within the indicator stale timeout.
+4. Minimize and close the window: the app must stay in the tray and keep the API alive; tray **Exit** must stop it.
+5. Verify no order is ever sent: the connector exposes no trading operations.
 
 Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local market archive is stored in `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`. The licence key and clock watermark are stored in `license.json` / `license-state.json` in the same folder. These files are outside the installation folder and are retained when the application is updated or uninstalled.
 

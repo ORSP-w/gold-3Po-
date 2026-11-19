@@ -3,18 +3,25 @@ import { spawn } from 'node:child_process';
 import { mkdir, rm } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-const port = 8787;
-const base = 'http://127.0.0.1:' + port;
 const token = 'browser-test-token-which-is-long-enough';
 const isolatedDataFile = '/tmp/gold-3po-browser-' + process.pid + '.jsonl';
 const isolatedSetupsFile = '/tmp/gold-3po-browser-setups-' + process.pid + '.json';
-const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), MARKET_INGEST_TOKEN: token, MARKET_DATA_FILE: isolatedDataFile, SETUPS_FILE: isolatedSetupsFile, LICENSE_REQUIRED: '0' }, stdio: 'ignore' });
+// Use an ephemeral port: a real installed GOLD-3Po may already own 8787.
+const server = spawn(process.execPath, ['server.js'], { env: { ...process.env, HOST: '127.0.0.1', PORT: '0', MARKET_INGEST_TOKEN: token, MARKET_DATA_FILE: isolatedDataFile, SETUPS_FILE: isolatedSetupsFile, LICENSE_REQUIRED: '0' }, stdio: ['ignore', 'pipe', 'ignore'] });
+let base = '';
 let browser;
 try {
   let ready = false;
-  for (let i = 0; i < 60; i++) {
-    try { const r = await fetch(base + '/health'); if (r.ok) { ready = true; break; } } catch {}
-    await new Promise(resolve => setTimeout(resolve, 250));
+  for (let i = 0; i < 60 && !ready; i++) {
+    const chunk = server.stdout.read();
+    if (chunk) {
+      const match = chunk.toString().match(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      if (match) base = 'http://127.0.0.1:' + match[1];
+    }
+    if (base) {
+      try { const r = await fetch(base + '/health'); if (r.ok) ready = true; } catch {}
+    }
+    if (!ready) await new Promise(resolve => setTimeout(resolve, 250));
   }
   assert.ok(ready, 'market server did not start');
   browser = await chromium.launch({ headless: true });
@@ -61,7 +68,7 @@ try {
   await page.locator('#layoutButton').click();
   assert.ok(!(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart'))));
 
-  const historyTicks = Array.from({length:30},(_,i)=>{const at=new Date(Date.now()-(29-i)*86400000);at.setUTCHours(10,0,0,0);return {timestamp:at.toISOString(),sequence:i+1,bid:2640+i*.1,ask:2640.2+i*.1,last:2640.1+i*.1,tickVolume:1,realVolume:0,flags:0};});
+  const historyTicks = Array.from({length:30},(_,i)=>{const at=new Date(Date.now()-(30-i)*86400000);at.setUTCHours(10,0,0,0);return {timestamp:at.toISOString(),sequence:i+1,bid:2640+i*.1,ask:2640.2+i*.1,last:2640.1+i*.1,tickVolume:1,realVolume:0,flags:0};});
   const historyResponse=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:historyTicks})});
   assert.equal(historyResponse.status,202,'30-day broker history fixture should be accepted');
   const now = new Date().toISOString();
@@ -107,6 +114,15 @@ try {
   assert.ok(setupsState.activeId, 'a setup must be active after Apply');
   assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
   assert.match(await page.locator('#licenseStatus').innerText(), /NOT REQUIRED/, 'licence row must reflect the CI dev mode');
+
+  // MT5 connection dialog exists and degrades safely outside Electron (no bridge).
+  await page.locator('#mt5Open').click();
+  await page.waitForSelector('#mt5Dialog[open]');
+  assert.ok(await page.locator('#mt5Terminal').count() === 1, 'terminal path field must exist');
+  assert.ok(await page.locator('#mt5Password').getAttribute('type') === 'password', 'password field must be masked');
+  assert.ok(await page.locator('#mt5Connect').isDisabled(), 'connect must be disabled without the desktop bridge');
+  assert.match(await page.locator('#mt5Detail').innerText(), /настольном приложении/, 'browser mode must explain the desktop-only login');
+  await page.locator('#mt5Close').click();
 
   await mkdir('artifacts', { recursive:true });
   await page.screenshot({ path:'artifacts/market-lab-desktop.png', fullPage:true });

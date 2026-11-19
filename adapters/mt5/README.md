@@ -1,5 +1,18 @@
 # RoboForex MT5 bridge
 
+Two integration paths exist:
+
+- **App-side connection (recommended):** sign in from the GOLD-3Po window
+  («Подключить MT5»). The bundled standalone connector (`mt5-runtime/gold3po-mt5.exe`,
+  built from `mt5_connector.py`) attaches to your broker terminal via the official
+  MetaTrader5 Python API, streams gold ticks into the local API and publishes
+  dynamic levels to `Common\Files\GOLD3PO\<SYMBOL>.csv`. The separate custom
+  indicator **`Gold3PoLevels.mq5`** reads that file and draws the levels on the
+  chart — no WebRequest, no DLL, no trading. See `docs/MT5-CONNECT.md`.
+- **EA bridge (this document):** `Gold3PoBridge.mq5` uploads up to 90 days of
+  broker tick history plus live quotes over HTTP and can also draw zones itself.
+  Use it for deep historical backfill; it never reads or transmits the account password.
+
 The Expert Advisor (EA) runs inside the user's logged-in MetaTrader 5 terminal. It never reads or transmits the trading account password. The terminal must be logged into the intended RoboForex server/account and have the target instrument (normally XAUUSD) selected.
 
 ## Install and configure

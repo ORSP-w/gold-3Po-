@@ -33,6 +33,7 @@ datetime historyEnd = 0;
 datetime historyChunkEnd = 0;
 bool historyChunkLoaded = false;
 int historyFailures = 0;
+ulong historyRejectedTotal = 0;
 ulong nextZonesRefreshAt = 0;
 string zonesStatusText = "";
 int zonesDrawnCount = 0;
@@ -46,8 +47,9 @@ string TickStamp(const long timeMsc)
    return stamp + StringFormat(".%03dZ", (int)(timeMsc % 1000));
 }
 
-bool PostJson(const string url, const string body)
+int PostJson(const string url, const string body, string &response)
 {
+   response = "";
    char data[];
    int copied = StringToCharArray(body, data, 0, WHOLE_ARRAY, CP_UTF8);
    if(copied > 0) ArrayResize(data, copied - 1);
@@ -55,15 +57,30 @@ bool PostJson(const string url, const string body)
    string responseHeaders;
    string headers = "Content-Type: application/json\r\nAuthorization: Bearer " + IngestToken + "\r\n";
    int status = WebRequest("POST", url, headers, RequestTimeoutMs, data, result, responseHeaders);
+   if(ArraySize(result) > 0) response = CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8);
    if(status < 200 || status >= 300)
-   {
       Print("GOLD-3Po bridge: POST failed status=", status, " error=", GetLastError(), " url=", url);
-      return false;
-   }
-   return true;
+   return status;
 }
 
-bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong &historySequence)
+long JsonLong(const string json, const string key)
+{
+   string pattern = "\"" + key + "\":";
+   int start = StringFind(json, pattern);
+   if(start < 0) return -1;
+   start += StringLen(pattern);
+   int end = start;
+   int len = StringLen(json);
+   while(end < len)
+   {
+      ushort ch = StringGetCharacter(json, end);
+      if(ch >= '0' && ch <= '9') end++; else break;
+   }
+   if(end == start) return -1;
+   return (long)StringToInteger(StringSubstr(json, start, end - start));
+}
+
+bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong &historySequence, string &response)
 {
    string body = "{\"source\":\"mt5\",\"symbol\":\"" + _Symbol + "\",\"ticks\":[";
    for(int i=0; i<count; i++)
@@ -79,7 +96,8 @@ bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong 
       );
    }
    body += "]}";
-   return PostJson(HistoryUrl, body);
+   int status = PostJson(HistoryUrl, body, response);
+   return status >= 200 && status < 300;
 }
 
 void StartHistorySync()
@@ -116,7 +134,7 @@ void ProcessHistorySync()
       if(historyCursor >= historyEnd)
       {
          historySynchronized = true;
-         Print("GOLD-3Po: history sync completed. Ticks uploaded: ", historyTotalTicks, ". Repeated ticks are de-duplicated by the API.");
+         Print("GOLD-3Po: history sync completed. Ticks uploaded: ", historyTotalTicks, ", rejected by API: ", historyRejectedTotal, ". Repeated ticks are de-duplicated by the API.");
          return;
       }
 
@@ -147,7 +165,15 @@ void ProcessHistorySync()
    if(historyOffset < total)
    {
       int count = MathMin(batchSize, total - historyOffset);
-      if(!SendHistoryBatch(historyTicks, historyOffset, count, historySequence))
+      string response;
+      bool sent = SendHistoryBatch(historyTicks, historyOffset, count, historySequence, response);
+      long rejectedNow = JsonLong(response, "rejected");
+      if(rejectedNow > 0)
+      {
+         historyRejectedTotal += (ulong)rejectedNow;
+         Print("GOLD-3Po: API rejected ", rejectedNow, " historical ticks in this batch.");
+      }
+      if(!sent && rejectedNow <= 0)
       {
          Print("GOLD-3Po: history upload failed; the same batch will be retried idempotently.");
          ScheduleHistoryRetry();
@@ -186,7 +212,33 @@ bool FlushLiveBatch()
       );
    }
    body += "]}";
-   if(!PostJson(LiveBatchUrl, body)) return false;
+   string response;
+   int status = PostJson(LiveBatchUrl, body, response);
+   if(status == 409)
+   {
+      // Sequence collision (e.g. another EA instance or a restart): rebase above the server cursor.
+      long lastAccepted = JsonLong(response, "lastAcceptedSequence");
+      if(lastAccepted >= 0)
+      {
+         if((double)lastAccepted > GlobalVariableGet(sequenceKey)) GlobalVariableSet(sequenceKey, (double)lastAccepted);
+         sequenceNumber = (ulong)MathMax((double)sequenceNumber, (double)lastAccepted);
+         for(int i=0; i<available; i++)
+         {
+            sequenceNumber++;
+            pendingSequences[i] = sequenceNumber;
+         }
+         Print("GOLD-3Po: live sequence rebased above ", lastAccepted, "; batch will be resent.");
+      }
+      return false;
+   }
+   if(status == 401 || status == 403 || status == 422)
+   {
+      Print("GOLD-3Po: permanent live-batch rejection (HTTP ", status, "). Dropping ", count, " ticks to keep history and zones running. Check the ingest token.");
+   }
+   else if(status < 200 || status >= 300)
+   {
+      return false; // transient failure: keep the queue for retry
+   }
    for(int i=count; i<available; i++)
    {
       pendingTicks[i-count] = pendingTicks[i];
@@ -439,10 +491,7 @@ void OnTimer()
    if(ArraySize(pendingTicks) > 0)
    {
       if(!FlushLiveBatch())
-      {
-         Print("GOLD-3Po: pending live tick batch retained for retry. Check API/WebRequest connectivity.");
-         return;
-      }
+         Print("GOLD-3Po: pending live tick batch retained for retry. History and zones continue independently.");
    }
    if(!historySynchronized && nowMs >= nextHistoryRetryAt)
       ProcessHistorySync();

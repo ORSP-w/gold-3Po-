@@ -1,0 +1,153 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { encodeSnapshot, snapshotPath, publishSnapshot } from './mt5-snapshot.js';
+import { createMt5Session } from './mt5-session.js';
+
+const zone = { id: 'LQ-buy-12.05', side: 'buy', low: 11.9, high: 12.2, strength: 0.69, state: 'UNTESTED' };
+
+test('snapshot format matches the indicator contract', () => {
+  const text = encodeSnapshot('XAUUSDm', [zone], 1795000000000);
+  const lines = text.split('\r\n');
+  assert.equal(lines[0], 'G3P1,1795000000,XAUUSDm,1');
+  assert.equal(lines[1], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,UNTESTED');
+  assert.equal(lines[2], 'END');
+  assert.equal(encodeSnapshot('XAUUSD', []).split('\r\n')[0], 'G3P1,' + Math.floor(Date.now() / 1000) + ',XAUUSD,0');
+  const noState = encodeSnapshot('XAUUSD', [{ ...zone, state: undefined }]);
+  assert.ok(noState.includes(',UNTESTED\r\n'), 'missing state must default to a non-empty token');
+});
+
+test('snapshot path rejects traversal and non-gold symbols', () => {
+  assert.throws(() => snapshotPath('C:\\Common', 'EURUSD'), /Invalid/);
+  assert.throws(() => snapshotPath('C:\\Common', 'XAUUSD..evil'), /Invalid/);
+  assert.throws(() => snapshotPath('relative', 'XAUUSD'), /Invalid/);
+  assert.ok(snapshotPath('C:\\Common', 'XAUUSDm').endsWith(join('Files', 'GOLD3PO', 'XAUUSDm.csv')));
+});
+
+test('publishSnapshot writes atomically into the common files folder', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'g3p-snap-'));
+  try {
+    await publishSnapshot(dir, 'XAUUSD.', [zone]);
+    const text = await readFile(join(dir, 'Files', 'GOLD3PO', 'XAUUSD..csv'), 'utf8');
+    assert.ok(text.startsWith('G3P1,'));
+    assert.ok(text.includes('buy-side'));
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+function fakeWorker(responses) {
+  return () => ({
+    stop() {},
+    async request(op) {
+      const value = responses[op];
+      if (typeof value === 'function') return value();
+      if (!value) throw new Error('unexpected op ' + op);
+      return value;
+    }
+  });
+}
+
+function fakeApi({ zones = [zone], licenseValid = () => true, failFirstLive = false } = {}) {
+  const calls = [];
+  let liveFailures = failFirstLive ? 1 : 0;
+  const request = async (url, init = {}) => {
+    const path = new URL(url).pathname;
+    calls.push({ path, body: init.body ? JSON.parse(init.body) : null });
+    if (path === '/v1/license/status') return { ok: licenseValid(), status: licenseValid() ? 200 : 402, json: async () => ({ valid: licenseValid() }) };
+    if (path === '/v1/chart/zones') return { ok: true, status: 200, json: async () => ({ zones }) };
+    if (path.startsWith('/v1/ingest/mt5/')) {
+      if (path.endsWith('live-batch') && liveFailures > 0) {
+        liveFailures--;
+        return { ok: false, status: 409, json: async () => ({ lastAcceptedSequence: 9999999999999 }) };
+      }
+      return { ok: true, status: 202, json: async () => ({ accepted: 1 }) };
+    }
+    throw new Error('unexpected route ' + path);
+  };
+  return { request, calls };
+}
+
+const tick = { timestamp: new Date(Date.now() - 60000).toISOString(), bid: 2648, ask: 2648.2, last: 2648.1, tickVolume: 1, realVolume: 0, flags: 0 };
+
+test('session connects, ingests, publishes zones and clears them on disconnect', async () => {
+  const published = [];
+  const api = fakeApi();
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSDm', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [tick] },
+      poll: { ok: true, ticks: [tick] }
+    }),
+    request: api.request,
+    publish: async (common, symbol, zones) => { published.push({ symbol, count: zones.length }); }
+  });
+  const state = await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+  assert.equal(state.state, 'online');
+  assert.equal(state.symbol, 'XAUUSDM');
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  assert.ok(api.calls.some(c => c.path === '/v1/ingest/mt5/history'), 'history must be ingested');
+  assert.ok(api.calls.some(c => c.path === '/v1/ingest/mt5/live-batch'), 'live ticks must be ingested');
+  assert.ok(published.some(p => p.symbol === 'XAUUSDM' && p.count === 1), 'zones must be published for the canonical broker symbol');
+  const offline = await session.disconnect();
+  assert.equal(offline.state, 'offline');
+  assert.ok(published.at(-1).count === 0, 'disconnect must clear the indicator snapshot');
+});
+
+test('session recovers from a live sequence collision', async () => {
+  const api = fakeApi({ failFirstLive: true });
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: { ok: true, ticks: [tick] }
+    }),
+    request: api.request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const liveCalls = api.calls.filter(c => c.path === '/v1/ingest/mt5/live-batch');
+  assert.ok(liveCalls.length >= 2, 'a 409 must trigger a resequenced resend');
+  assert.ok(liveCalls.at(-1).body.ticks[0].sequence > 9999999999999, 'resent ticks must be resequenced above the server cursor');
+  assert.equal(session.state().state, 'online');
+  await session.disconnect();
+});
+
+test('session disconnects when the licence becomes invalid', async () => {
+  let valid = true;
+  const api = fakeApi({ licenseValid: () => valid });
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: { ok: true, ticks: [] }
+    }),
+    request: api.request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 2200));
+  valid = false;
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const state = session.state();
+  assert.equal(state.state, 'offline');
+  assert.match(state.message, /лиценз/i);
+});
+
+test('session rejects malformed connect input without starting a worker', async () => {
+  let started = false;
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+    makeWorker: () => { started = true; return fakeWorker({})(); },
+    request: async () => { throw new Error('no network expected'); },
+    publish: async () => {}
+  });
+  await assert.rejects(() => session.connect({ terminalPath: 'C:\\evil.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' }), /terminal64/);
+  await assert.rejects(() => session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: 'abc', password: 'p', server: 'S', symbol: 'XAUUSD' }), /Заполните/);
+  await assert.rejects(() => session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'EURUSD' }), /Заполните/);
+  assert.equal(started, false);
+});

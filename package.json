@@ -1,1 +1,109 @@
-{"name": "gold-3po-market-lab", "version": "0.4.0", "private": true, "author": "GOLD-3Po", "type": "module", "main": "electron/main.js", "description": "GOLD-3Po Market Lab desktop application", "scripts": {"start": "node --env-file=.env server.js", "start:desktop": "electron .", "dist:win": "electron-builder --win nsis --x64 --publish never", "test": "node --test", "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-client.js && node --check research-client.js && node --check market-engine.js && node --check strategy-engine.js && node --check backtest-engine.js && node --check risk-engine.js && node --check ui.browser.mjs && node --check electron/main.js && node --check license.js && node --check machine-id.js && node --check license-client.js && node --check setup-store.js && node --check setups-client.js && node --check tools/make-key.js", "serve": "python3 -m http.server 4173", "license:init": "node tools/make-key.js init", "license:issue": "node tools/make-key.js issue"}, "devDependencies": {"electron": "45.3.4", "electron-builder": "26.18.0"}, "build": {"appId": "by.gold3po.marketlab", "productName": "GOLD-3Po Market Lab", "asar": true, "directories": {"output": "release"}, "files": ["electron/**/*", "index.html", "app.js", "styles.css", "market-data.js", "market-client.js", "research-client.js", "market-engine.js", "strategy-engine.js", "backtest-engine.js", "risk-engine.js", "server.js", "license.js", "machine-id.js", "license-client.js", "setup-store.js", "setups-client.js", "README.md", "LICENSE-KEYS.md", "docs/SETUPS.md", "package.json"], "extraResources": [{"from": "adapters/mt5/Gold3PoBridge.mq5", "to": "adapters/mt5/Gold3PoBridge.mq5"}, {"from": "adapters/mt5/README.md", "to": "adapters/mt5/README.md"}, {"from": "adapters/comex/README.md", "to": "adapters/comex/README.md"}], "win": {"target": [{"target": "nsis", "arch": ["x64"]}]}, "artifactName": "GOLD-3Po-Setup-${version}-${arch}.${ext}", "nsis": {"oneClick": false, "perMachine": false, "allowElevation": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true, "createStartMenuShortcut": true, "runAfterFinish": false, "deleteAppDataOnUninstall": false, "shortcutName": "GOLD-3Po Market Lab", "installerLanguages": ["ru_RU", "en_US"]}}}
+{
+  "name": "gold-3po-market-lab",
+  "version": "0.5.0",
+  "private": true,
+  "author": "GOLD-3Po",
+  "type": "module",
+  "main": "electron/main.js",
+  "description": "GOLD-3Po Market Lab desktop application",
+  "scripts": {
+    "start": "node --env-file=.env server.js",
+    "start:desktop": "electron .",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "test": "node --test --test-force-exit",
+    "check": "node --check app.js && node --check server.js && node --check market-data.js && node --check market-client.js && node --check research-client.js && node --check mt5-client.js && node --check market-engine.js && node --check strategy-engine.js && node --check backtest-engine.js && node --check risk-engine.js && node --check ui.browser.mjs && node --check electron/main.js && node --check electron/preload.cjs && node --check electron/mt5-session.js && node --check electron/mt5-snapshot.js && node --check electron/mt5-indicator.js && node --check license.js && node --check machine-id.js && node --check license-client.js && node --check setup-store.js && node --check setups-client.js && node --check tools/make-key.js",
+    "serve": "python3 -m http.server 4173",
+    "license:init": "node tools/make-key.js init",
+    "license:issue": "node tools/make-key.js issue"
+  },
+  "devDependencies": {
+    "electron": "45.3.4",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "by.gold3po.marketlab",
+    "productName": "GOLD-3Po Market Lab",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "!electron/**/*.test.js",
+      "index.html",
+      "app.js",
+      "styles.css",
+      "market-data.js",
+      "market-client.js",
+      "research-client.js",
+      "mt5-client.js",
+      "market-engine.js",
+      "strategy-engine.js",
+      "backtest-engine.js",
+      "risk-engine.js",
+      "server.js",
+      "license.js",
+      "machine-id.js",
+      "license-client.js",
+      "setup-store.js",
+      "setups-client.js",
+      "README.md",
+      "LICENSE-KEYS.md",
+      "docs/SETUPS.md",
+      "docs/MT5-CONNECT.md",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "adapters/mt5/Gold3PoBridge.mq5",
+        "to": "adapters/mt5/Gold3PoBridge.mq5"
+      },
+      {
+        "from": "adapters/mt5/Gold3PoLevels.mq5",
+        "to": "adapters/mt5/Gold3PoLevels.mq5"
+      },
+      {
+        "from": "adapters/mt5/mt5_connector.py",
+        "to": "adapters/mt5/mt5_connector.py"
+      },
+      {
+        "from": "adapters/mt5/README.md",
+        "to": "adapters/mt5/README.md"
+      },
+      {
+        "from": "adapters/comex/README.md",
+        "to": "adapters/comex/README.md"
+      },
+      {
+        "from": "release/mt5-runtime",
+        "to": "mt5-runtime"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "artifactName": "GOLD-3Po-Setup-${version}-${arch}.${ext}",
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": false,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "GOLD-3Po Market Lab",
+      "installerLanguages": [
+        "ru_RU",
+        "en_US"
+      ]
+    }
+  }
+}

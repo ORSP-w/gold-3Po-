@@ -73,24 +73,53 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
 
 export function detectLiquidityZones(bars, priceStep = 0.1) {
   if (!Array.isArray(bars) || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid liquidity input');
-  if (bars.length < 5) return [];
+  if (bars.length < 6) return [];
+  // The newest bar may still be forming: pivots are confirmed only by closed bars.
+  const closed = bars.slice(0, -1);
+  const last = bars.at(-1).c;
   const pivots = [];
-  for (let i=2;i<bars.length-2;i++) {
-    const b=bars[i], prev=bars.slice(i-2,i), next=bars.slice(i+1,i+3);
-    if (prev.every(x=>b.h>=x.h) && next.every(x=>b.h>=x.h)) pivots.push({side:'buy',price:b.h,index:i});
-    if (prev.every(x=>b.l<=x.l) && next.every(x=>b.l<=x.l)) pivots.push({side:'sell',price:b.l,index:i});
+  for (let i = 2; i < closed.length - 2; i++) {
+    const b = closed[i];
+    if (!(b.h > b.l)) continue; // zero-range bars are not swing evidence
+    const prev = closed.slice(i - 2, i), next = closed.slice(i + 1, i + 3);
+    if (prev.every(x => b.h >= x.h) && next.every(x => b.h >= x.h) && (prev.some(x => b.h > x.h) || next.some(x => b.h > x.h))) pivots.push({ side: 'buy', price: b.h, index: i });
+    if (prev.every(x => b.l <= x.l) && next.every(x => b.l <= x.l) && (prev.some(x => b.l < x.l) || next.some(x => b.l < x.l))) pivots.push({ side: 'sell', price: b.l, index: i });
   }
-  const groups=[];
-  for(const pivot of pivots.sort((a,b)=>a.price-b.price)){
-    let group=groups.find(g=>g.side===pivot.side && Math.abs(g.price-pivot.price)<=priceStep*3);
-    if(!group){group={side:pivot.side,prices:[],indices:[]};groups.push(group);}
-    group.prices.push(pivot.price);group.indices.push(pivot.index);group.price=group.prices.reduce((a,b)=>a+b,0)/group.prices.length;
+  const groups = [];
+  for (const pivot of pivots.sort((a, b) => a.price - b.price)) {
+    let group = groups.find(g => g.side === pivot.side && Math.abs(g.price - pivot.price) <= priceStep * 3);
+    if (!group) { group = { side: pivot.side, prices: [], indices: [] }; groups.push(group); }
+    group.prices.push(pivot.price); group.indices.push(pivot.index);
+    group.price = group.prices.reduce((a, b) => a + b, 0) / group.prices.length;
   }
-  const last=bars.at(-1).c;
-  return groups.filter(g=>g.indices.length>=2).map((g,i)=>{
-    const low=Math.min(...g.prices)-priceStep,high=Math.max(...g.prices)+priceStep;
-    const strength=Math.min(0.98,0.45+g.indices.length*0.12);
-    const distance=g.price-last;
-    return {id:'LQ-'+g.side+'-'+i,side:g.side,low,high,strength,label:g.side==='buy'?'Repeated swing highs':'Repeated swing lows',distance:(distance>0?'+':'')+distance.toFixed(2),state:Math.abs(distance)<=priceStep*5?'NEAR PRICE':'UNTESTED'};
-  }).sort((a,b)=>b.strength-a.strength).slice(0,8);
+  const zones = [];
+  for (const g of groups) {
+    if (g.indices.length < 2) continue;
+    const low = Math.min(...g.prices) - priceStep, high = Math.max(...g.prices) + priceStep;
+    const formedAt = Math.max(...g.indices);
+    // Track what price did after the zone formed: touch, sweep, or close-through break.
+    let state = 'UNTESTED', broken = false;
+    for (let i = formedAt + 1; i < closed.length && !broken; i++) {
+      const b = closed[i];
+      if (g.side === 'buy') {
+        if (b.c > high) broken = true;
+        else if (b.h >= low) state = b.h > high ? 'SWEPT' : 'TESTED';
+      } else {
+        if (b.c < low) broken = true;
+        else if (b.l <= high) state = b.l < low ? 'SWEPT' : 'TESTED';
+      }
+    }
+    if (broken) continue; // consumed liquidity no longer offers a reaction level
+    const distance = g.price - last;
+    if (state === 'UNTESTED' && Math.abs(distance) <= priceStep * 5) state = 'NEAR PRICE';
+    const strength = Math.min(0.98, 0.45 + g.indices.length * 0.12);
+    zones.push({
+      id: `LQ-${g.side}-${g.price.toFixed(2)}`,
+      side: g.side, low, high, strength,
+      label: g.side === 'buy' ? 'Repeated swing highs' : 'Repeated swing lows',
+      distance: (distance > 0 ? '+' : '') + distance.toFixed(2),
+      state, formedAt: closed[formedAt].time ?? null, touches: g.indices.length
+    });
+  }
+  return zones.sort((a, b) => b.strength - a.strength).slice(0, 8);
 }

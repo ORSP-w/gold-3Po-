@@ -54,6 +54,18 @@ jobs:
           npm run check
           if ($LASTEXITCODE -ne 0) { throw "Syntax checks failed." }
 
+      - name: Set up Python for the MT5 connector
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Build standalone MT5 connector
+        shell: pwsh
+        run: |
+          python -m pip install --quiet pyinstaller MetaTrader5
+          python -m PyInstaller --noconfirm --clean --onedir --console --name gold3po-mt5 --hidden-import MetaTrader5 --collect-all numpy --distpath release/mt5-runtime --workpath release/mt5-build --specpath release adapters/mt5/mt5_connector.py
+          if (-not (Test-Path release/mt5-runtime/gold3po-mt5/gold3po-mt5.exe)) { throw "Standalone MT5 connector was not created." }
+
       - name: Build Windows x64 installer
         shell: pwsh
         run: |
@@ -67,7 +79,7 @@ jobs:
 
           @(
             "GOLD-3Po Market Lab Electron Windows installer",
-            "Version: 0.4.0",
+            "Version: 0.5.0",
             "Commit: $env:GITHUB_SHA",
             "Target: Windows x64",
             "Framework: Electron",
@@ -115,7 +127,7 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GOLD-3Po-Electron-Windows-Setup-0.4.0
+          name: GOLD-3Po-Electron-Windows-Setup-0.5.0
           path: release/*
           if-no-files-found: error
           retention-days: 30
@@ -123,8 +135,8 @@ jobs:
       - name: Publish GitHub pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.4.0.${{ github.run_number }}
-          name: GOLD-3Po Market Lab v0.4.0
+          tag_name: v0.5.0.${{ github.run_number }}
+          name: GOLD-3Po Market Lab v0.5.0
           target_commitish: ${{ github.sha }}
           prerelease: true
           generate_release_notes: true

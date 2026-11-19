@@ -48,4 +48,5 @@ window.addEventListener('market-replay',e=>{
 });
 window.addEventListener('market-replay-step',e=>{if(replayMode)select(Number(e.detail?.index));});
 window.addEventListener('exit-replay',()=>{replayMode=false;});
+const initialStatus=$('#chartStatus');if(initialStatus&&!live){initialStatus.textContent='DEMO FIXTURE · CONNECT MT5 FOR LIVE DATA';initialStatus.className='warning';}
 renderZones();select(selected);
