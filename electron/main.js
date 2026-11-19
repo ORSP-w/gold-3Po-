@@ -11,11 +11,14 @@ import { createLicenseManager } from '../license.js';
 import { createSetupStore } from '../setup-store.js';
 
 app.setName('GOLD-3Po Market Lab');
+if (process.platform === 'win32') app.setAppUserModelId('by.gold3po.marketlab');
 const userDataPath = path.join(app.getPath('appData'), app.getName());
 app.setPath('userData', userDataPath);
 
 const isSmokeTest = process.argv.includes('--smoke-test');
-const trayIconDataUrl = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAAADFBMVEUAAAAYEwzzu0n/0Gh5odbeAAAAAXRSTlMAQObYZgAAAFpJREFUeNq100sKACAIBcDM+985AqHEb2JvVTgLKR0jmSniV7nZZxA5Qi0TIQBgiRSw6yQeAF4pAOTRgdtDH2Bd/AHs0g/EW/Z+Vmmk8kMbjH24OPHqxcvrZQHNMgVL5iTAZQAAAABJRU5ErkJggg==';
+const appIconPath = app.isPackaged
+  ? path.join(process.resourcesPath, 'gold3po-icon.ico')
+  : fileURLToPath(new URL('../assets/gold3po-icon.ico', import.meta.url));
 
 let mainWindow = null;
 let tray = null;
@@ -170,7 +173,8 @@ function restoreMainWindow() {
 
 function createTray() {
   try {
-    const icon = nativeImage.createFromDataURL(trayIconDataUrl);
+    const icon = nativeImage.createFromPath(appIconPath);
+    if (icon.isEmpty()) throw new Error('GOLD-3Po icon asset could not be loaded.');
     const menu = Menu.buildFromTemplate([
       { label: 'Open', click: restoreMainWindow },
       { label: 'Exit', click: () => app.quit() }
@@ -197,6 +201,7 @@ function createMainWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#101010',
     title: 'GOLD-3Po Market Lab',
+    icon: appIconPath,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -269,6 +274,9 @@ async function runSmokeTest() {
     const response = await fetch(localOrigin + asset, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Application asset ${asset} returned HTTP ${response.status}.`);
   }
+
+  const appIcon = nativeImage.createFromPath(appIconPath);
+  if (appIcon.isEmpty()) throw new Error('The packaged C-3PO application icon could not be loaded.');
 
   const licenseResponse = await fetch(`${localOrigin}/v1/license/status`, { signal: AbortSignal.timeout(10000) });
   if (!licenseResponse.ok) throw new Error(`Licence status endpoint returned HTTP ${licenseResponse.status}.`);

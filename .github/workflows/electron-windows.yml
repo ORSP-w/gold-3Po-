@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/electron-windows.yml"
       - "electron/**"
+      - "assets/**"
       - "package.json"
       - "README.md"
       - "RELEASE-TEST-NOTES.md"
@@ -106,6 +107,18 @@ jobs:
           $appExe = Join-Path $installDir "GOLD-3Po Market Lab.exe"
           if (-not (Test-Path -LiteralPath $appExe)) {
             throw "Installed Electron application executable was not found: $appExe"
+          }
+          $desktopShortcut = Join-Path ([Environment]::GetFolderPath("Desktop")) "GOLD-3Po Market Lab.lnk"
+          if (-not (Test-Path -LiteralPath $desktopShortcut)) {
+            throw "Desktop shortcut was not created by the installer: $desktopShortcut"
+          }
+          $shell = New-Object -ComObject WScript.Shell
+          $shortcut = $shell.CreateShortcut($desktopShortcut)
+          if ([IO.Path]::GetFullPath($shortcut.TargetPath) -ne [IO.Path]::GetFullPath($appExe)) {
+            throw "Desktop shortcut does not target the packaged GOLD-3Po application."
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $installDir "resources\gold3po-icon.ico"))) {
+            throw "The packaged C-3PO icon resource is missing."
           }
 
           $stdout = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke.stdout.log"
