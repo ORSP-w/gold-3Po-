@@ -1,7 +1,12 @@
 import { marketSymbol } from './mt5-client.js';
 const api=document.querySelector('#apiStatus'),mt5=document.querySelector('#mt5Status'),comex=document.querySelector('#comexStatus');
 const labels={mt5,comex};let source;let analysisTimer=null;let lastAnalysisAt=0;
-function paint(node,label,state){if(!node)return;node.textContent=label;node.className=state==='online'?'ok':state==='error'?'error':'warning';}
+const pill=document.querySelector('.demo-pill'),link=document.querySelector('.connection');
+function topStatus(label,state){
+ if(pill)pill.lastChild.textContent=' ROBOFOREX MT5 · '+label;
+ if(link){link.lastChild.textContent=state==='online'?' LIVE DATA':state==='error'?' OFFLINE':' WAITING FOR DATA';link.classList.toggle('is-live',state==='online');}
+}
+function paint(node,label,state){if(node===mt5)topStatus(label,state);if(!node)return;node.textContent=label;node.className=state==='online'?'ok':state==='error'?'error':'warning';}
 function ageLabel(ms){if(!Number.isFinite(ms))return '—';if(ms<1000)return 'NOW';if(ms<60000)return Math.floor(ms/1000)+'s AGO';return Math.floor(ms/60000)+'m AGO';}
 async function refreshAnalysis(){
  try{
