@@ -1,4 +1,5 @@
 import { marketSymbol } from './mt5-client.js';
+const tfMs = () => window.gold3poIntervalMs?.() || 900000;
 const $ = id => document.getElementById(id);
 const status = $('researchStatus');
 let replayBars = [];
@@ -38,7 +39,7 @@ async function exitReplay() {
   $('replayPosition').textContent = 'Live market view';
   window.dispatchEvent(new CustomEvent('exit-replay'));
   try {
-    const response = await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
+    const response = await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs='+tfMs()+'&priceStep=0.1',{cache:'no-store'});
     const data = await response.json();
     if (!response.ok) { notify(apiError(data,'Could not refresh live data')); return; }
     if (data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
@@ -59,9 +60,10 @@ async function loadReplay() {
   $('liveView').disabled = true;
   notify('Loading historical ticks and building replay bars…');
   const from = $('replayFrom').value, to = $('replayTo').value;
-  const query = new URLSearchParams({symbol:marketSymbol(),intervalMs:'900000',priceStep:'0.1'});
+  const query = new URLSearchParams({symbol:marketSymbol(),intervalMs:String(tfMs()),priceStep:'0.1'});
   if (from) query.set('from',new Date(from).toISOString());
-  if (to) query.set('to',new Date(to).toISOString());
+  // The default end is the page-load time; while untouched it means "until now", so new ticks are included.
+  if (to && to !== autoReplayTo) query.set('to',new Date(to).toISOString());
   try {
     const response = await fetch('/v1/market/replay?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
@@ -101,7 +103,7 @@ function playReplay() {
 async function runBacktest() {
   notify('Running historical simulation…');
   const query = new URLSearchParams({
-    symbol:marketSymbol(),intervalMs:'900000',initialEquity:String(number('backtestEquity',10000)),
+    symbol:marketSymbol(),intervalMs:String(tfMs()),initialEquity:String(number('backtestEquity',10000)),
     riskPct:String(number('backtestRisk',0.5)),
     pointValue:String(number('backtestPointValue',1))
   });
@@ -139,7 +141,7 @@ async function calculateRisk() {
 }
 async function refreshSignals() {
   try {
-    const response = await fetch('/v1/market/signals?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs=900000',{cache:'no-store'});
+    const response = await fetch('/v1/market/signals?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs='+tfMs(),{cache:'no-store'});
     if (!response.ok) return;
     const data = await response.json();
     const signal = data.latest;
@@ -174,6 +176,7 @@ $('enableAlerts')?.addEventListener('click',async()=>{
 const end = new Date(), start = new Date(end.getTime()-30*86400000);
 if ($('replayFrom')) $('replayFrom').value = localInput(start);
 if ($('replayTo')) $('replayTo').value = localInput(end);
+const autoReplayTo = $('replayTo')?.value || '';
 window.addEventListener('market-analysis',()=>{
   if (signalTimer !== null) window.clearTimeout(signalTimer);
   signalTimer = window.setTimeout(()=>{signalTimer=null;refreshSignals();},1800);

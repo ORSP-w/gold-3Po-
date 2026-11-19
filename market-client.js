@@ -10,7 +10,7 @@ function paint(node,label,state){if(node===mt5)topStatus(label,state);if(!node)r
 function ageLabel(ms){if(!Number.isFinite(ms))return '—';if(ms<1000)return 'NOW';if(ms<60000)return Math.floor(ms/1000)+'s AGO';return Math.floor(ms/60000)+'m AGO';}
 async function refreshAnalysis(){
  try{
-  const response=await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs=900000&priceStep=0.1',{cache:'no-store'});
+  const response=await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs='+(window.gold3poIntervalMs?.()||900000)+'&priceStep=0.1',{cache:'no-store'});
   if(!response.ok)throw new Error('HTTP '+response.status);
   const data=await response.json();
   if(data.bars?.length){
@@ -37,4 +37,5 @@ function connectStream(){
  source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target&&!message.historical)paint(target,'LIVE · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol===marketSymbol())scheduleAnalysis();}catch{/* malformed frame ignored; health polling remains authoritative */}});
 }
 window.addEventListener('mt5-symbol-change',()=>{lastAnalysisAt=0;refreshAnalysis();refreshHealth();});
+window.addEventListener('gold3po-settings',e=>{if(e.detail?.zonesChanged){lastAnalysisAt=0;refreshAnalysis();}});
 refreshHealth();refreshAnalysis();connectStream();window.setInterval(refreshHealth,5000);

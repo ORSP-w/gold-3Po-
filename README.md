@@ -4,14 +4,14 @@ GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUU
 
 ## Implemented parts
 
-1. **Liquidity & Footprint workspace:** interactive OHLC chart, repeated swing-high/low liquidity zones, Bid × Ask / Delta / Volume footprint modes, bar inspector, selection and reset.
+1. **Liquidity & Footprint workspace:** interactive OHLC chart, 3–7 ATR-based reaction zones (swing clusters with role flips, ranked by touches, reaction, recency, volume and distance), Bid × Ask / Delta / Volume footprint modes, bar inspector, selection and reset.
 2. **Market data transport:** authenticated MT5 tick and history ingestion, sequenced live batches, COMEX normalized trade contract, SSE, health checks and append-only JSONL persistence.
 3. **Market engine:** OHLC aggregation, price-level activity, Delta, Cumulative Delta, adjacent and stacked imbalance candidates, repeated liquidity pools, sweeps/reclaims, and conservative unknown-side handling.
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.
 5. **Decision support:** evidence-scored liquidity-sweep signals, walk-forward historical win-rate calibration, browser alerts, position sizing and risk guardrails.
 6. **Offline licensing:** Ed25519-signed licence keys bound to one computer, valid 1–9999 days, verified locally with no licence server; activation screen, clock-rollback protection and a vendor-side key generator. See `LICENSE-KEYS.md`.
 7. **Custom conditions (Vespera-style setup library):** named setups with append-only immutable versions, strict JSON import/export and explicit apply; conditions drive signals, backtest defaults and risk guardrails. See `docs/SETUPS.md`.
-8. **MT5 zone drawing:** the EA polls `/v1/chart/zones` and draws live liquidity-zone rectangles with labels on the MT5 chart, refreshed as the market evolves. Data-only, never trades.
+8. **MT5 zone drawing:** the EA polls `/v1/chart/zones` and draws live zones on the MT5 chart in the colours/line style chosen in ⚙ Настройки (default: red solid lines), refreshed as the market evolves. Data-only, never trades.
 9. **MT5 connection from the app:** sign in to your broker terminal (account/server/password, investor password recommended) from the GOLD-3Po window; the bundled standalone connector receives gold ticks and publishes dynamic levels to the separate `Gold3PoLevels` MT5 indicator via Common Files. The app minimizes to the tray and keeps streaming. See `docs/MT5-CONNECT.md`.
 
 ## Windows desktop application
@@ -23,6 +23,7 @@ Download **GOLD-3Po-Setup-*.exe** from the latest GitHub release, run the instal
 On first launch, the application creates a local ingestion token and settings file. Application settings and market history are stored outside the installation directory so they survive application updates and uninstallation:
 
 - Windows settings: `%APPDATA%\GOLD-3Po Market Lab\settings.json`
+- Zone and MT5 drawing settings (⚙ Настройки): `%APPDATA%\GOLD-3Po Market Lab\zone-settings.json`
 - Market archive: `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`
 - Licence key and clock watermark: `%APPDATA%\GOLD-3Po Market Lab\license.json` and `license-state.json`
 

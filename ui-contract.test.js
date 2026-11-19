@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 const html = await readFile(new URL('./index.html', import.meta.url), 'utf8');
 const app = await readFile(new URL('./app.js', import.meta.url), 'utf8');
 const styles = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
-test('all static action buttons are wired or explicitly delegated',()=>{const buttons=[...html.matchAll(/<button\b([^>]*)>/g)].map(m=>m[1]);for(const attrs of buttons){const hasId=/\bid=/.test(attrs),delegated=/\bdata-mode=/.test(attrs);assert.ok(hasId||delegated,'Unwired static button: '+attrs);}});
+test('all static action buttons are wired or explicitly delegated',()=>{const buttons=[...html.matchAll(/<button\b([^>]*)>/g)].map(m=>m[1]);for(const attrs of buttons){const hasId=/\bid=/.test(attrs),delegated=/\bdata-(mode|go|tab|value|color)=/.test(attrs);assert.ok(hasId||delegated,'Unwired static button: '+attrs);}});
 test('every direct control ID exists in markup and has an action handler',()=>{for(const id of ['resetView','layoutButton','zonesToggle','numbersToggle','footprintModes']){assert.ok(html.includes('id="'+id+'"'),'Missing '+id);assert.ok(app.includes("$('#"+id+"')"),'No handler/query for '+id);}});
 test('inactive placeholder navigation and timeframe controls are absent',()=>{assert.doesNotMatch(html,/rail-button|id="timeframes"|id="notifications"|id="settings"/);assert.doesNotMatch(app,/\$\('#timeframes'\)/);});
 test('chart and footprint targets exist before the module initializes',()=>{for(const id of ['priceChart','footprintGrid','zoneList','selectedBar','selectedDelta','bidVolume','askVolume','totalVolume','imbalance','toast'])assert.ok(html.includes('id="'+id+'"'),'Missing UI target '+id);});
@@ -36,7 +36,7 @@ test('licence gate and setup library controls are wired',async()=>{
   for(const id of ['activateLicense','copyMachineId'])assert.ok(licenseClient.includes("$('#"+id+"')?.addEventListener")||licenseClient.includes("document.querySelector('#"+id+"')?.addEventListener"),'Licence control has no handler: '+id);
   assert.match(licenseClient,/\/v1\/license\/status/);
   assert.match(licenseClient,/\/v1\/license\/activate/);
-  for(const id of ['setupSelect','setupName','saveSetup','applySetup','exportSetup','importSetup','importSetupFile','setupStatus','condMinScore','condRejection','condStacked','condMaxZones'])assert.ok(html.includes('id="'+id+'"'),'Missing setup target '+id);
+  for(const id of ['setupSelect','setupName','saveSetup','applySetup','exportSetup','importSetup','importSetupFile','setupStatus','condMinScore','condRejection','condStacked'])assert.ok(html.includes('id="'+id+'"'),'Missing setup target '+id);
   for(const id of ['saveSetup','applySetup','exportSetup','importSetup','importSetupFile'])assert.ok(setupsClient.includes("$('"+id+"')?.addEventListener"),'Setup control has no handler: '+id);
   assert.match(setupsClient,/\/v1\/setups/);
   assert.match(html,/setups-client\.js/);
@@ -59,4 +59,15 @@ test('MT5 connection dialog, tray-safe bridge and indicator installer are wired'
   assert.match(main,/preload:/);
   assert.match(main,/new URL\(frame\.url\)\.origin !== localOrigin/);
   assert.match(html,/mt5-client\.js/);
+});
+
+test('settings sheet controls exist and are handled by settings-client',async()=>{
+  const client=await readFile(new URL('./settings-client.js', import.meta.url),'utf8');
+  for(const id of ['settingsDialog','openSettings','settingsClose','settingsDone','settingsReset','settingsTabs','settingsStatus','setMinZones','setMaxZones','setTimeframe','setPivotWidth','setClusterAtr','setZoneWidthAtr','setMaxDistanceAtr','setAtrPeriod','setBuyColor','setSellColor','setLineStyle','setLineWidth','setFill','setLabels','setStrength','setTheme','stylePreview','railNav']){
+    assert.ok(html.includes('id="'+id+'"'),'missing #'+id);
+    assert.ok(client.includes("'"+id+"'"),'settings-client does not handle #'+id);
+  }
+  for(const go of [...html.matchAll(/data-go="([^"]+)"/g)].map(m=>m[1]))assert.ok(client.includes("'"+go+"'")||client.includes(go+':'),'rail target not handled: '+go);
+  assert.match(client,/closest\('button\[data-tab\]'\)/);assert.match(client,/closest\('button\[data-value\]'\)/);
+  assert.ok(html.indexOf('settings-client.js')<html.indexOf('market-client.js'),'settings must load before the market client reads the timeframe');
 });
