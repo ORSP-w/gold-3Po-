@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { encodeSnapshot, snapshotPath, publishSnapshot } from './mt5-snapshot.js';
 import { createMt5Session } from './mt5-session.js';
 
+const commonRoot = process.platform === 'win32' ? 'C:\\Common' : '/tmp/g3p-common';
+
 const zone = { id: 'LQ-buy-12.05', side: 'buy', low: 11.9, high: 12.2, strength: 0.69, state: 'UNTESTED' };
 
 test('snapshot format matches the indicator contract', () => {
@@ -20,10 +22,10 @@ test('snapshot format matches the indicator contract', () => {
 });
 
 test('snapshot path rejects traversal and non-gold symbols', () => {
-  assert.throws(() => snapshotPath('C:\\Common', 'EURUSD'), /Invalid/);
-  assert.throws(() => snapshotPath('C:\\Common', 'XAUUSD..evil'), /Invalid/);
+  assert.throws(() => snapshotPath(commonRoot, 'EURUSD'), /Invalid/);
+  assert.throws(() => snapshotPath(commonRoot, 'XAUUSD..evil'), /Invalid/);
   assert.throws(() => snapshotPath('relative', 'XAUUSD'), /Invalid/);
-  assert.ok(snapshotPath('C:\\Common', 'XAUUSDm').endsWith(join('Files', 'GOLD3PO', 'XAUUSDm.csv')));
+  assert.ok(snapshotPath(commonRoot, 'XAUUSDm').endsWith(join('Files', 'GOLD3PO', 'XAUUSDm.csv')));
 });
 
 test('publishSnapshot writes atomically into the common files folder', async () => {
