@@ -25,20 +25,40 @@ try {
     if (!ready) await new Promise(resolve => setTimeout(resolve, 250));
   }
   assert.ok(ready, 'market server did not start');
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, deviceScaleFactor: 1 });
   const pageErrors = [];
   page.on('pageerror', error => pageErrors.push(error.message));
   await page.goto(base, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('.foot-cell');
-  assert.equal(await page.locator('.candle').count(), 12, '12 price bars should render');
-  assert.equal(await page.locator('.foot-cell').count(), 180, '15 price levels × 12 bars should render');
-  assert.equal(await page.locator('.zone-row').count(), 4, 'four liquidity zones should render');
+
+  // Без фида брокера рабочая область показывает пустое состояние, а не демонстрационные свечи.
+  await page.waitForSelector('#chartEmpty:not([hidden])', { timeout: 5000 });
+  assert.equal(await page.locator('.candle').count(), 0, 'никаких демо-свечей до прихода данных брокера');
+  assert.equal(await page.locator('.zone-row').count(), 0, 'никаких демо-зон до прихода данных брокера');
+  assert.match(await page.locator('#zoneList').innerText(), /Зон пока нет/);
+  assert.match(await page.locator('#chartStatus').innerText(), /ПОДКЛЮЧИТЕ MT5/);
 
   const reset = await page.locator('#resetView').boundingBox();
   const workspace = await page.locator('#layoutButton').boundingBox();
   assert.ok(Math.abs(reset.y - workspace.y) < 1, 'top action buttons must align vertically');
   assert.equal(reset.height, workspace.height, 'top action buttons must have equal height');
+
+  const historyTicks = Array.from({length:30},(_,i)=>{const at=new Date(Date.now()-(30-i)*86400000);at.setUTCHours(10,0,0,0);return {timestamp:at.toISOString(),sequence:i+1,bid:2640+i*.1,ask:2640.2+i*.1,last:2640.1+i*.1,tickVolume:1,realVolume:0,flags:0};});
+  const historyResponse=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:historyTicks})});
+  assert.equal(historyResponse.status,202,'30-day broker history fixture should be accepted');
+  const now = new Date().toISOString();
+  const mt5 = { source:'mt5', symbol:'XAUUSD', timestamp:now, sequence:Date.now(), bid:2648.2, ask:2648.4, last:2648.3, tickVolume:1, realVolume:0 };
+  const comex = { source:'comex', symbol:'GCZ6', timestamp:now, sequence:Date.now(), tradeId:'browser-check-'+Date.now(), price:2650.1, size:2, aggressorSide:'buy' };
+  for (const [path, event] of [['/v1/ingest/mt5/tick',mt5],['/v1/ingest/comex/trade',comex]]) {
+    const response = await fetch(base + path, { method:'POST', headers:{ authorization:'Bearer '+token, 'content-type':'application/json' }, body:JSON.stringify(event) });
+    assert.equal(response.status,202, 'feed event should be accepted');
+  }
+  await page.waitForFunction(() => document.querySelector('#mt5Status')?.textContent.startsWith('ОНЛАЙН'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#comexStatus')?.textContent.startsWith('ОНЛАЙН'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('ОНЛАЙН'), null, { timeout:5000 });
+  assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day broker history');
+  assert.equal(await page.locator('#chartEmpty').isHidden(), true, 'empty state must disappear once broker data arrives');
+  assert.ok(await page.locator('.zone-row').count() > 0, 'liquidity zones should appear once broker history arrives');
 
   await page.locator('.zone-row').first().click();
   assert.equal(await page.locator('.zone-row.selected').count(), 1, 'zone click should select one zone');
@@ -56,36 +76,22 @@ try {
   assert.ok(await page.locator('.foot-cell').first().innerText().then(v => v.trim()).then(v => v === ''), 'number toggle should hide cell values');
   await page.locator('#numbersToggle').click();
 
-  await page.locator('.foot-cell[data-index="3"]').first().click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#004/);
+  const firstCell = page.locator('.foot-cell').first();
+  const firstIndex = Number(await firstCell.getAttribute('data-index'));
+  await firstCell.click();
+  assert.match(await page.locator('#selectedBar').innerText(), new RegExp('#'+String(firstIndex+1).padStart(3,'0')));
   await page.locator('.candle[data-index="2"]').click();
   assert.match(await page.locator('#selectedBar').innerText(), /#003/);
+
+  const totalBars = Number((await page.locator('#barCount').innerText()).replace(/[^\d]/g, ''));
   await page.locator('#resetView').click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#012/);
+  assert.match(await page.locator('#selectedBar').innerText(), new RegExp('#'+String(totalBars).padStart(3,'0')), 'reset should select the newest candle');
   assert.equal(await page.locator('.zone-row.selected').count(), 0, 'reset should clear zone selection');
 
   await page.locator('#layoutButton').click();
   assert.ok(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart')));
   await page.locator('#layoutButton').click();
   assert.ok(!(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart'))));
-
-  const historyTicks = Array.from({length:30},(_,i)=>{const at=new Date(Date.now()-(30-i)*86400000);at.setUTCHours(10,0,0,0);return {timestamp:at.toISOString(),sequence:i+1,bid:2640+i*.1,ask:2640.2+i*.1,last:2640.1+i*.1,tickVolume:1,realVolume:0,flags:0};});
-  const historyResponse=await fetch(base+'/v1/ingest/mt5/history',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify({source:'mt5',symbol:'XAUUSD',ticks:historyTicks})});
-  assert.equal(historyResponse.status,202,'30-day broker history fixture should be accepted');
-  const now = new Date().toISOString();
-  const mt5 = { source:'mt5', symbol:'XAUUSD', timestamp:now, sequence:Date.now(), bid:2648.2, ask:2648.4, last:2648.3, tickVolume:1, realVolume:0 };
-  const comex = { source:'comex', symbol:'GCZ6', timestamp:now, sequence:Date.now(), tradeId:'browser-check-'+Date.now(), price:2650.1, size:2, aggressorSide:'buy' };
-  for (const [path, event] of [['/v1/ingest/mt5/tick',mt5],['/v1/ingest/comex/trade',comex]]) {
-    const response = await fetch(base + path, { method:'POST', headers:{ authorization:'Bearer '+token, 'content-type':'application/json' }, body:JSON.stringify(event) });
-    assert.equal(response.status,202, 'feed event should be accepted');
-  }
-  await page.waitForFunction(() => document.querySelector('#mt5Status')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
-  await page.waitForFunction(() => document.querySelector('#comexStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
-  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
-  assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day history, not remain at 12 fixture candles');
-  await page.locator('.candle[data-index="0"]').click();
-  assert.match(await page.locator('#selectedBar').innerText(), /#001/);
-  assert.ok(await page.locator('.foot-cell[data-index="0"]').count() > 0, 'footprint window should follow a selected historical candle');
 
   await page.locator('#loadReplay').click();
   await page.waitForFunction(() => document.querySelector('#replaySlider') && !document.querySelector('#replaySlider').disabled, null, { timeout:5000 });
@@ -96,25 +102,25 @@ try {
   await page.waitForTimeout(250);
   await page.locator('#pauseReplay').click();
   await page.locator('#liveView').click();
-  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('LIVE'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#chartStatus')?.textContent.startsWith('ОНЛАЙН'), null, { timeout:5000 });
   await page.locator('#runBacktest').click();
-  await page.waitForFunction(() => document.querySelector('#backtestSummary')?.textContent.includes('trades'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#backtestSummary')?.textContent.includes('сделок'), null, { timeout:5000 });
   await page.locator('#calculateRisk').click();
-  await page.waitForFunction(() => document.querySelector('#riskResult')?.textContent.includes('PLAN PASSES GUARDRAILS'), null, { timeout:5000 });
-  assert.match(await page.locator('#riskChecks').innerText(), /PASS/);
+  await page.waitForFunction(() => document.querySelector('#riskResult')?.textContent.includes('ПЛАН ПРОХОДИТ ПРОВЕРКУ'), null, { timeout:5000 });
+  assert.match(await page.locator('#riskChecks').innerText(), /ОК/);
 
   // Vespera-style setup library: save, apply and verify the active conditions propagate.
   await page.locator('#setupName').fill('Browser strict');
   await page.locator('#condStacked').check();
   await page.locator('#saveSetup').click();
-  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Saved Browser strict'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Сохранено: Browser strict'), null, { timeout:5000 });
   await page.locator('#setupSelect').selectOption({ index: 1 });
   await page.locator('#applySetup').click();
-  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Applied'), null, { timeout:5000 });
+  await page.waitForFunction(() => document.querySelector('#setupStatus')?.textContent.includes('Применено'), null, { timeout:5000 });
   const setupsState = await (await fetch(base + '/v1/setups')).json();
   assert.ok(setupsState.activeId, 'a setup must be active after Apply');
   assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
-  assert.match(await page.locator('#licenseStatus').innerText(), /NOT REQUIRED/, 'licence row must reflect the CI dev mode');
+  assert.match(await page.locator('#licenseStatus').innerText(), /НЕ ТРЕБУЕТСЯ/, 'licence row must reflect the CI dev mode');
 
   // MT5 connection dialog exists and degrades safely outside Electron (no bridge).
   await page.locator('#mt5Open').click();
@@ -159,7 +165,7 @@ try {
   assert.ok(mobile.chart > 0 && mobile.footprint > 0, 'chart and footprint must remain visible on mobile');
   await page.screenshot({ path:'artifacts/market-lab-mobile.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
-  process.stdout.write('Browser checks passed: chart, footprint, zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
+  process.stdout.write('Browser checks passed: empty state, chart, footprint, zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

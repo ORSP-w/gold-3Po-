@@ -1,4 +1,4 @@
-# GOLD-3Po v0.7.0 — Electron Windows installer test
+# GOLD-3Po v0.8.0 — Electron Windows installer test
 
 ## Install and launch
 
@@ -28,7 +28,7 @@ Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local 
 1. On first launch an activation screen covers the workspace and shows this computer's **Machine ID** (Copy button).
 2. Send the Machine ID to the vendor. The vendor issues a signed key: `node tools/make-key.js issue --days 30 --machine <ID>`.
 3. Paste the whole `GOLD1.…` key into the activation field and press **Activate licence**. No internet is used.
-4. The status panel shows `Licence · ACTIVE · Nd LEFT`. When the term expires the activation screen returns; ingest keeps recording data in the background.
+4. The status panel shows `Лицензия · АКТИВНА · N дн.`. When the term expires the activation screen returns; ingest keeps recording data in the background.
 5. Rolling the system clock back more than 5 minutes (against the stored watermark or the MT5 feed time) blocks the licence with `CLOCK ROLLBACK` until the correct time is restored.
 
 ## Connect RoboForex MT5
@@ -38,7 +38,7 @@ Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local 
 3. Open the installed EA source at `resources\adapters\mt5\Gold3PoBridge.mq5` in the GOLD-3Po installation directory using MetaEditor. Press F7 to compile.
 4. Open `%APPDATA%\GOLD-3Po Market Lab\settings.json` in Notepad and copy the value of `marketIngestToken`.
 5. Attach the EA to the RoboForex XAUUSD chart. In EA Inputs, paste the copied value into `IngestToken`.
-6. Confirm `http://127.0.0.1:8787/health` reports the MT5 feed and the chart transitions from demo fixtures to broker history/live data.
+6. Confirm `http://127.0.0.1:8787/health` reports the MT5 feed and the chart leaves the empty state («График пуст») and shows broker history / live data.
 
 The EA is data-only. It cannot place or manage orders. Keep it on a demo account for the initial test.
 
@@ -60,7 +60,7 @@ An empty replay or zero backtest trades can be a valid result when there is not 
 
 ## Important limits
 
-- The first screen can show clearly labelled demo fixtures until broker data arrives.
+- Without broker data the workspace shows an empty state («График пуст») instead of demo candles: nothing on the chart is invented. The interface, including research modules, licence screen and status labels, is in Russian.
 - RoboForex XAUUSD is OTC/CFD data. It is not centralized COMEX trade flow or exchange volume.
 - Real COMEX flow requires a separately licensed provider adapter and entitlement; a live CME feed is not bundled.
 - MetaEditor compilation and a real RoboForex feed have not been verified by CI. Confirm those in your own terminal.

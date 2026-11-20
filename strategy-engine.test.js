@@ -17,7 +17,7 @@ test('liquidity sweep creates a scored long signal with explicit evidence',()=>{
   assert.equal(signals.length,1);
   assert.equal(signals[0].side,'long');
   assert.ok(signals[0].technicalScore>=0.55);
-  assert.ok(signals[0].evidence.includes('Liquidity sweep and reclaim'));
+  assert.ok(signals[0].evidence.includes('Снятие ликвидности и возврат'));
   assert.equal(signals[0].probability,null);
 });
 test('walk-forward calibration uses only trades closed before each signal',()=>{

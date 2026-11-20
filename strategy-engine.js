@@ -73,15 +73,15 @@ export function generateSignals(bars, options = {}) {
       if (requireStacked && !stacked) continue;
       if (requireDeltaAgree && !deltaAgrees) continue;
       let score = 0.45;
-      const evidence = ['Liquidity sweep and reclaim'];
-      if (rejection) { score += 0.15; evidence.push('Rejection candle agrees with reversal'); }
-      if (closeEdge) { score += 0.10; evidence.push('Close held near rejection edge'); }
-      if (stacked) { score += 0.15; evidence.push('Stacked imbalance agrees'); }
+      const evidence = ['Снятие ликвидности и возврат'];
+      if (rejection) { score += 0.15; evidence.push('Свеча отторжения подтверждает разворот'); }
+      if (closeEdge) { score += 0.10; evidence.push('Закрытие удержалось у границы'); }
+      if (stacked) { score += 0.15; evidence.push('Накопленный дисбаланс подтверждает'); }
       if (directionalKnown) {
-        if (deltaAgrees) { score += 0.10; evidence.push('Aggressor delta agrees'); }
-        else { score -= 0.05; evidence.push('Aggressor delta diverges'); }
+        if (deltaAgrees) { score += 0.10; evidence.push('Дельта агрессора подтверждает'); }
+        else { score -= 0.05; evidence.push('Дельта агрессора расходится'); }
       } else {
-        evidence.push('Bid/Ask aggressor side unavailable');
+        evidence.push('Сторона агрессора недоступна');
       }
       const atr = averageTrueRange(bars, index, atrPeriod);
       if (atr !== null && atr > 0) score += 0.05;

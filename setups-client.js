@@ -57,7 +57,7 @@ function renderLibrary() {
   select.innerHTML = '';
   const none = document.createElement('option');
   none.value = '';
-  none.textContent = 'Default conditions (no setup applied)';
+  none.textContent = 'Условия по умолчанию (сетап не применён)';
   select.appendChild(none);
   for (const setup of library.setups) {
     for (const version of setup.versions) {
@@ -71,17 +71,17 @@ function renderLibrary() {
   else if ([...select.options].some(o => o.value === previous)) select.value = previous;
   fillFields(library.activeDefinition);
   const active = library.setups.find(s => s.id === library.activeId);
-  say(active ? 'Active: ' + active.name + ' · v' + library.activeVersion + '. Saved versions are immutable; saving again appends a new version.' : 'Default conditions active. Save your own conditions as a named setup.');
+  say(active ? 'Активен: ' + active.name + ' · v' + library.activeVersion + '. Сохранённые версии неизменяемы; повторное сохранение добавит новую версию.' : 'Активны условия по умолчанию. Сохраните свои условия как именованный сетап.');
 }
 
 async function loadLibrary() {
   try {
     const response = await fetch('/v1/setups', { cache: 'no-store' });
-    if (response.status === 402) { say('Licence required — activate your key to manage setups.'); return; }
+    if (response.status === 402) { say('Требуется лицензия — активируйте ключ, чтобы работать с сетапами.'); return; }
     if (!response.ok) throw new Error('HTTP ' + response.status);
     library = await response.json();
     renderLibrary();
-  } catch (error) { say('Setup library unavailable: ' + error.message); }
+  } catch (error) { say('Библиотека сетапов недоступна: ' + error.message); }
 }
 
 async function postJson(url, body) {
@@ -95,30 +95,30 @@ function announceChange() { window.dispatchEvent(new CustomEvent('setups-changed
 
 $('saveSetup')?.addEventListener('click', async () => {
   const name = ($('setupName')?.value || '').trim();
-  if (!name) { say('Enter a setup name first.'); return; }
+  if (!name) { say('Сначала введите название сетапа.'); return; }
   try {
     const result = await postJson('/v1/setups', { name, definition: collectDefinition() });
     await loadLibrary();
-    say(result.deduplicated ? 'Identical conditions already saved as ' + name + ' v' + result.version + '.' : 'Saved ' + name + ' v' + result.version + ' (' + result.fingerprint.slice(0, 8) + '). Press Apply to use it.');
+    say(result.deduplicated ? 'Такие условия уже сохранены как ' + name + ' v' + result.version + '.' : 'Сохранено: ' + name + ' v' + result.version + ' (' + result.fingerprint.slice(0, 8) + '). Нажмите «Применить», чтобы использовать.');
     announceChange();
-  } catch (error) { say('Save failed: ' + error.message); }
+  } catch (error) { say('Не удалось сохранить: ' + error.message); }
 });
 
 $('applySetup')?.addEventListener('click', async () => {
   const value = $('setupSelect')?.value;
-  if (!value) { say('Select a saved setup version to apply.'); return; }
+  if (!value) { say('Выберите сохранённую версию сетапа, чтобы применить.'); return; }
   const [id, version] = value.split('|');
   try {
     await postJson('/v1/setups/apply', { id, version: Number(version) });
     await loadLibrary();
-    say('Applied. Signals, backtest and risk defaults now use these conditions.');
+    say('Применено. Сигналы, бэктест и риск теперь используют эти условия.');
     announceChange();
-  } catch (error) { say('Apply failed: ' + error.message); }
+  } catch (error) { say('Не удалось применить: ' + error.message); }
 });
 
 $('exportSetup')?.addEventListener('click', async () => {
   const value = $('setupSelect')?.value;
-  if (!value) { say('Select a setup version to export.'); return; }
+  if (!value) { say('Выберите версию сетапа для экспорта.'); return; }
   const [id, version] = value.split('|');
   try {
     const response = await fetch('/v1/setups/export?id=' + encodeURIComponent(id) + '&version=' + version, { cache: 'no-store' });
@@ -130,8 +130,8 @@ $('exportSetup')?.addEventListener('click', async () => {
     link.download = 'gold3po-setup-' + data.name.replace(/[^\w.-]+/g, '-') + '-v' + data.version + '.json';
     link.click();
     URL.revokeObjectURL(link.href);
-    say('Exported ' + data.name + ' v' + data.version + ' as JSON.');
-  } catch (error) { say('Export failed: ' + error.message); }
+    say('Экспортировано: ' + data.name + ' v' + data.version + ' в JSON.');
+  } catch (error) { say('Не удалось экспортировать: ' + error.message); }
 });
 
 $('importSetup')?.addEventListener('click', () => $('importSetupFile')?.click());
@@ -145,9 +145,9 @@ $('importSetupFile')?.addEventListener('change', async event => {
     const name = parsed.name || file.name.replace(/\.json$/i, '');
     const result = await postJson('/v1/setups/import', { name, definition });
     await loadLibrary();
-    say('Imported as a new setup identity (v' + result.version + '). Apply it explicitly when ready.');
+    say('Импортировано как новый сетап (v' + result.version + '). Примените его вручную, когда будете готовы.');
     announceChange();
-  } catch (error) { say('Import rejected: ' + error.message); }
+  } catch (error) { say('Импорт отклонён: ' + error.message); }
   event.target.value = '';
 });
 

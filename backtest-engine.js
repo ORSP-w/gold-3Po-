@@ -82,6 +82,6 @@ export function runBacktest(bars, options = {}) {
       avgR: trades.length ? trades.reduce((sum, trade) => sum + trade.netR, 0) / trades.length : null
     },
     trades,
-    limitations: ['Signals are evaluated at bar close and entered at the next bar open.', 'If stop and target are both touched in one candle, stop is assumed first.', 'Results are historical simulation, not a forecast; use out-of-sample and walk-forward validation.']
+    limitations: ['Сигналы рассчитываются на закрытии свечи, вход — по открытию следующей.', 'Если стоп и цель задеты в одной свече, первым считается стоп.', 'Результаты — историческая симуляция, а не прогноз; проверяйте их вне выборки и скользящим окном.']
   };
 }

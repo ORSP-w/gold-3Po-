@@ -16,7 +16,7 @@ test('backtest enters after signal close and returns trades with conservative me
  assert.ok(trade.exitIndex>=trade.entryIndex);
  assert.ok(Number.isFinite(result.summary.finalEquity));
  assert.ok(Number.isFinite(result.summary.maxDrawdownPct));
- assert.ok(result.limitations.some(item=>item.includes('stop and target')));
+ assert.ok(result.limitations.some(item=>item.includes('стоп и цель')));
 });
 test('backtest rejects risk settings above configured cap',()=>{
  assert.throws(()=>runBacktest(fixture(),{riskPct:2,maxRiskPct:1}),/Invalid backtest configuration/);

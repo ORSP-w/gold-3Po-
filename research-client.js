@@ -16,12 +16,15 @@ const localInput = date => {
   const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return shifted.toISOString().slice(0,16);
 };
-const money = value => Number(value).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+const money = value => Number(value).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+const sideText = side => side === 'long' ? 'ЛОНГ' : side === 'short' ? 'ШОРТ' : String(side || '').toUpperCase();
+const exitText = reason => ({target:'тейк',stop:'стоп',time:'по времени'})[reason] || String(reason || '');
+const calibrationText = status => ({insufficient_out_of_sample_samples:'недостаточно истории',walk_forward_historical_win_rate:'винрейт по истории'})[status] || String(status || '');
 const notify = message => {
   if (status) status.textContent = message;
 };
 const apiError = (data, fallback) => data?.error === 'license_required'
-  ? 'Licence required — activate your key on the licence screen.'
+  ? 'Требуется лицензия — активируйте ключ на экране лицензии.'
   : (data?.message || data?.error || fallback);
 
 function stopReplay() {
@@ -36,21 +39,21 @@ async function exitReplay() {
   $('playReplay').disabled = true;
   $('replaySlider').disabled = true;
   $('liveView').disabled = true;
-  $('replayPosition').textContent = 'Live market view';
+  $('replayPosition').textContent = 'Живой рынок';
   window.dispatchEvent(new CustomEvent('exit-replay'));
   try {
     const response = await fetch('/v1/market/analysis?symbol='+encodeURIComponent(marketSymbol())+'&intervalMs='+tfMs()+'&priceStep=0.1',{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) { notify(apiError(data,'Could not refresh live data')); return; }
+    if (!response.ok) { notify(apiError(data,'Не удалось обновить живые данные')); return; }
     if (data.bars?.length) window.dispatchEvent(new CustomEvent('market-analysis',{detail:data}));
-    notify('Returned to current broker feed.');
-  } catch(error) { notify('Could not refresh live data: '+error.message); }
+    notify('Вернулись к текущему фиду брокера.');
+  } catch(error) { notify('Не удалось обновить живые данные: '+error.message); }
 }
 function selectReplay(index) {
   if (!replayBars.length) return;
   const safe = Math.max(0,Math.min(replayBars.length-1,Number(index)||0));
   $('replaySlider').value = String(safe);
-  $('replayPosition').textContent = `${safe+1} / ${replayBars.length} · ${new Date(replayBars[safe].time).toLocaleString()}`;
+  $('replayPosition').textContent = `${safe+1} / ${replayBars.length} · ${new Date(replayBars[safe].time).toLocaleString('ru-RU')}`;
   window.dispatchEvent(new CustomEvent('market-replay-step',{detail:{index:safe}}));
 }
 async function loadReplay() {
@@ -58,23 +61,23 @@ async function loadReplay() {
   stopReplay();
   $('replaySlider').disabled = true;
   $('liveView').disabled = true;
-  notify('Loading historical ticks and building replay bars…');
+  notify('Загружаем исторические тики и строим свечи повтора…');
   const from = $('replayFrom').value, to = $('replayTo').value;
   const query = new URLSearchParams({symbol:marketSymbol(),intervalMs:String(tfMs()),priceStep:'0.1'});
   if (from) query.set('from',new Date(from).toISOString());
-  // The default end is the page-load time; while untouched it means "until now", so new ticks are included.
+  // Пока поле «По» не меняли, оно означает «до текущего момента», поэтому новые тики тоже попадают в повтор.
   if (to && to !== autoReplayTo) query.set('to',new Date(to).toISOString());
   try {
     const response = await fetch('/v1/market/replay?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(apiError(data,'Replay request failed'));
+    if (!response.ok) throw new Error(apiError(data,'Запрос повтора не выполнен'));
     replayBars = data.bars || [];
     if (!replayBars.length) {
       $('replaySlider').disabled = true;
       $('playReplay').disabled = true;
       $('pauseReplay').disabled = true;
-      $('replayPosition').textContent = 'No bars in selected range';
-      notify(`No broker ticks found. Events: ${data.eventCount || 0}`);
+      $('replayPosition').textContent = 'В выбранном периоде нет свечей';
+      notify(`Тики брокера не найдены. Событий: ${data.eventCount || 0}`);
       return;
     }
     $('replaySlider').min='0';
@@ -86,8 +89,8 @@ async function loadReplay() {
     $('liveView').disabled=false;
     window.dispatchEvent(new CustomEvent('market-replay',{detail:data}));
     selectReplay(0);
-    notify(`Replay ready: ${replayBars.length} bars from ${data.eventCount} ticks`);
-  } catch(error) { notify('Replay error: '+error.message); }
+    notify(`Повтор готов: ${replayBars.length} свечей из ${data.eventCount} тиков`);
+  } catch(error) { notify('Ошибка повтора: '+error.message); }
 }
 function playReplay() {
   if (!replayBars.length || replayTimer !== null) return;
@@ -101,7 +104,7 @@ function playReplay() {
   },Math.max(60,500/speed));
 }
 async function runBacktest() {
-  notify('Running historical simulation…');
+  notify('Идёт историческая симуляция…');
   const query = new URLSearchParams({
     symbol:marketSymbol(),intervalMs:String(tfMs()),initialEquity:String(number('backtestEquity',10000)),
     riskPct:String(number('backtestRisk',0.5)),
@@ -110,20 +113,20 @@ async function runBacktest() {
   try {
     const response = await fetch('/v1/market/backtest?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(apiError(data,'Backtest failed'));
+    if (!response.ok) throw new Error(apiError(data,'Бэктест не выполнен'));
     const s = data.summary;
-    $('backtestSummary').textContent = `${s.trades} trades · ${s.wins}W / ${s.losses}L · ${s.winRate===null?'—':(s.winRate*100).toFixed(1)+'%'} win rate · ${s.netPnl>=0?'+':''}${money(s.netPnl)} P&L · ${s.maxDrawdownPct.toFixed(2)}% max drawdown`;
+    $('backtestSummary').textContent = `${s.trades} сделок · ${s.wins} прибыльных / ${s.losses} убыточных · винрейт ${s.winRate===null?'—':(s.winRate*100).toFixed(1)+'%'} · P&L ${s.netPnl>=0?'+':''}${money(s.netPnl)} · макс. просадка ${s.maxDrawdownPct.toFixed(2)}%`;
     $('backtestDetails').textContent = s.trades
-      ? `Final equity ${money(s.finalEquity)} · Profit factor ${s.profitFactor===null?'∞':s.profitFactor.toFixed(2)} · Expectancy ${s.expectancyR.toFixed(3)}R · ${data.bars} bars`
-      : `No qualifying setups in ${data.bars} available bars. Minimum warm-up and valid liquidity sweeps are required.`;
+      ? `Итоговый капитал ${money(s.finalEquity)} · профит-фактор ${s.profitFactor===null?'∞':s.profitFactor.toFixed(2)} · матожидание ${s.expectancyR.toFixed(3)}R · свечей: ${data.bars}`
+      : `Подходящих сетапов нет среди ${data.bars} доступных свечей. Нужны прогрев и корректные снятия ликвидности.`;
     $('backtestCaveat').textContent = data.limitations.join(' ');
-    const rows = (data.trades||[]).slice(-8).reverse().map(t=>`${t.side.toUpperCase()} · ${new Date(t.entryTime).toLocaleString()} → ${new Date(t.exitTime).toLocaleString()} · ${t.exitReason} · ${t.netR.toFixed(2)}R`);
-    $('backtestTrades').textContent = rows.length ? rows.join(' | ') : 'No closed trades yet.';
-    notify('Backtest finished. Historical results are not a forecast.');
-  } catch(error) { notify('Backtest error: '+error.message); }
+    const rows = (data.trades||[]).slice(-8).reverse().map(t=>`${sideText(t.side)} · ${new Date(t.entryTime).toLocaleString('ru-RU')} → ${new Date(t.exitTime).toLocaleString('ru-RU')} · ${exitText(t.exitReason)} · ${t.netR.toFixed(2)}R`);
+    $('backtestTrades').textContent = rows.length ? rows.join(' | ') : 'Закрытых сделок пока нет.';
+    notify('Бэктест завершён. Исторические результаты не являются прогнозом.');
+  } catch(error) { notify('Ошибка бэктеста: '+error.message); }
 }
 async function calculateRisk() {
-  notify('Calculating position size and risk limits…');
+  notify('Считаем объём позиции и лимиты риска…');
   const query = new URLSearchParams({
     equity:String(number('riskEquity',10000)),riskPct:String(number('riskPercent',0.5)),
     entry:String(number('riskEntry',2650)),stop:String(number('riskStop',2645)),
@@ -133,11 +136,11 @@ async function calculateRisk() {
   try {
     const response = await fetch('/v1/risk/plan?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
-    if (!response.ok) throw new Error(apiError(data,'Risk calculation failed'));
-    $('riskResult').textContent = `${data.allowed?'PLAN PASSES GUARDRAILS':'PLAN BLOCKED'} · ${data.direction||'INVALID DIRECTION'} · size ${data.quantity.toFixed(4)} units · planned loss ${money(data.plannedLoss)} · target gain ${money(data.plannedGain)} · R:R ${data.riskReward.toFixed(2)}:1`;
-    $('riskChecks').textContent = data.checks.map(item=>(item.passed?'PASS':'BLOCK')+' — '+item.message).join(' · ');
-    notify(data.allowed?'Risk plan passed configured limits.':'Risk plan blocked by guardrails.');
-  } catch(error) { notify('Risk calculation error: '+error.message); }
+    if (!response.ok) throw new Error(apiError(data,'Расчёт риска не выполнен'));
+    $('riskResult').textContent = `${data.allowed?'ПЛАН ПРОХОДИТ ПРОВЕРКУ':'ПЛАН ЗАБЛОКИРОВАН'} · ${data.direction?sideText(data.direction):'НАПРАВЛЕНИЕ НЕ ОПРЕДЕЛЕНО'} · объём ${data.quantity.toFixed(4)} ед. · плановый убыток ${money(data.plannedLoss)} · целевая прибыль ${money(data.plannedGain)} · R:R ${data.riskReward.toFixed(2)}:1`;
+    $('riskChecks').textContent = data.checks.map(item=>(item.passed?'ОК':'БЛОК')+' — '+item.message).join(' · ');
+    notify(data.allowed?'План риска в пределах заданных лимитов.':'План риска заблокирован ограничителями.');
+  } catch(error) { notify('Ошибка расчёта риска: '+error.message); }
 }
 async function refreshSignals() {
   try {
@@ -146,15 +149,15 @@ async function refreshSignals() {
     const data = await response.json();
     const signal = data.latest;
     if (!signal) {
-      $('signalMonitor').textContent = 'No qualifying liquidity sweep signal in the current history.';
+      $('signalMonitor').textContent = 'В текущей истории нет подходящего снятия ликвидности.';
       $('signalCalibration').textContent = data.caveat || '';
       return;
     }
-    const probability = signal.probability === null ? 'Not calibrated' : (signal.probability*100).toFixed(1)+'% historical win rate';
-    $('signalMonitor').textContent = `${signal.side.toUpperCase()} · technical score ${(signal.technicalScore*100).toFixed(0)}/100 · ${probability} · ${new Date(signal.time).toLocaleString()}`;
-    $('signalCalibration').textContent = signal.evidence.join(' · ')+' | '+signal.calibrationStatus+' ('+(signal.calibrationSamples||0)+' prior trades)';
+    const probability = signal.probability === null ? 'без калибровки' : (signal.probability*100).toFixed(1)+'% исторический винрейт';
+    $('signalMonitor').textContent = `${sideText(signal.side)} · техническая оценка ${(signal.technicalScore*100).toFixed(0)}/100 · ${probability} · ${new Date(signal.time).toLocaleString('ru-RU')}`;
+    $('signalCalibration').textContent = signal.evidence.join(' · ')+' | '+calibrationText(signal.calibrationStatus)+' ('+(signal.calibrationSamples||0)+' прошлых сделок)';
     if (notificationsEnabled && signal.id !== latestSignalId && signal.technicalScore >= 0.70 && 'Notification' in window) {
-      new Notification('GOLD-3Po · '+signal.side.toUpperCase(),{body:`Liquidity sweep setup. Technical score ${(signal.technicalScore*100).toFixed(0)}/100. This is not a trade instruction.`});
+      new Notification('GOLD-3Po · '+sideText(signal.side),{body:`Сетап снятия ликвидности. Техническая оценка ${(signal.technicalScore*100).toFixed(0)}/100. Это не торговая рекомендация.`});
     }
     latestSignalId = signal.id;
   } catch {}
@@ -167,11 +170,11 @@ $('replaySlider')?.addEventListener('input',event=>{stopReplay();selectReplay(ev
 $('runBacktest')?.addEventListener('click',runBacktest);
 $('calculateRisk')?.addEventListener('click',calculateRisk);
 $('enableAlerts')?.addEventListener('click',async()=>{
-  if (!('Notification' in window)) { notify('Browser notifications are not supported. Signals remain visible in this panel.'); return; }
+  if (!('Notification' in window)) { notify('Браузерные уведомления не поддерживаются. Сигналы остаются в этой панели.'); return; }
   const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission;
   notificationsEnabled = permission === 'granted';
-  $('enableAlerts').textContent = notificationsEnabled ? 'Alerts enabled' : 'Enable alerts';
-  notify(notificationsEnabled ? 'Signal notifications enabled in this browser.' : 'Notification permission was not granted.');
+  $('enableAlerts').textContent = notificationsEnabled ? 'Уведомления включены' : 'Включить уведомления';
+  notify(notificationsEnabled ? 'Уведомления о сигналах включены в этом браузере.' : 'Разрешение на уведомления не выдано.');
 });
 const end = new Date(), start = new Date(end.getTime()-30*86400000);
 if ($('replayFrom')) $('replayFrom').value = localInput(start);

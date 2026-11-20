@@ -14,10 +14,10 @@ export function calculateRiskPlan(input = {}) {
   const riskAmount = equity * riskPct / 100;
   const quantity = stopDistance > 0 ? riskAmount / (stopDistance * pointValue) : 0;
   const checks = [
-    { id: 'risk-cap', passed: riskPct <= maxRiskPct, message: `Risk ${riskPct}% must not exceed cap ${maxRiskPct}%` },
-    { id: 'direction', passed: Boolean(direction), message: 'Stop and target must be on opposite sides of entry in a consistent direction' },
-    { id: 'reward-risk', passed: riskReward >= minRiskReward, message: `Reward/risk must be at least ${minRiskReward}:1` },
-    { id: 'size', passed: quantity > 0 && Number.isFinite(quantity), message: 'Position size must be positive' }
+    { id: 'risk-cap', passed: riskPct <= maxRiskPct, message: `Риск ${riskPct}% не должен превышать лимит ${maxRiskPct}%` },
+    { id: 'direction', passed: Boolean(direction), message: 'Стоп и цель должны быть по разные стороны от входа в одном направлении' },
+    { id: 'reward-risk', passed: riskReward >= minRiskReward, message: `Соотношение прибыль/риск должно быть не меньше ${minRiskReward}:1` },
+    { id: 'size', passed: quantity > 0 && Number.isFinite(quantity), message: 'Объём позиции должен быть положительным' }
   ];
   return {
     allowed: checks.every(check => check.passed),
