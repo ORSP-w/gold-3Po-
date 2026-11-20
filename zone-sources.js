@@ -83,9 +83,10 @@ function volumeProfile(bars, priceStep) {
   ];
 }
 
-export function collectSourceLevels(bars, { priceStep = 0.1 } = {}) {
+export function collectSourceLevels(bars, { priceStep = 0.1, use = {} } = {}) {
   if (!Array.isArray(bars) || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid source level input');
   if (bars.length < 6) return [];
+  const allowed = { priorDay: use.priorDay !== false, sessions: use.sessions !== false, week: use.week !== false, higherTf: use.higherTf !== false, volume: use.volume !== false };
   const levels = [];
   const indexed = bars.map((bar, i) => ({ ...bar, __i: i }));
   const timed = indexed.filter(bar => timeOf(bar) !== null);
@@ -99,7 +100,7 @@ export function collectSourceLevels(bars, { priceStep = 0.1 } = {}) {
     }
     const keys = [...days.keys()].sort();
     // Previous completed day: the strongest reference for an intraday chart.
-    for (const [offset, weight] of [[2, 0.9], [3, 0.5]]) {
+    if (allowed.priorDay) for (const [offset, weight] of [[2, 0.9], [3, 0.5]]) {
       const day = extremes(days.get(keys.at(-offset)) || []);
       if (!day) continue;
       const tag = offset === 2 ? 'Prior day' : 'Two days ago';
@@ -108,7 +109,7 @@ export function collectSourceLevels(bars, { priceStep = 0.1 } = {}) {
     }
     const today = keys.at(-1);
     const sessions = [['Asia', 0, 7], ['London', 7, 12], ['New York', 12, 17]];
-    for (const [name, from, to] of sessions) {
+    if (allowed.sessions) for (const [name, from, to] of sessions) {
       const sessionBars = timed.filter(bar => {
         const time = timeOf(bar);
         const day = new Date(time).toISOString().slice(0, 10);
@@ -132,14 +133,15 @@ export function collectSourceLevels(bars, { priceStep = 0.1 } = {}) {
     }
     const weekKeys = [...weeks.keys()].sort();
     const currentWeek = extremes(weeks.get(weekKeys.at(-1)) || []);
-    if (currentWeek && finite(currentWeek.open)) levels.push({ price: currentWeek.open, label: 'Weekly open', source: 'week', weight: 0.5, index: currentWeek.index });
+    if (allowed.week && currentWeek && finite(currentWeek.open)) levels.push({ price: currentWeek.open, label: 'Weekly open', source: 'week', weight: 0.5, index: currentWeek.index });
     const previousWeek = extremes(weeks.get(weekKeys.at(-2)) || []);
-    if (previousWeek) {
+    if (allowed.week && previousWeek) {
       levels.push({ price: previousWeek.high, label: 'Prior week high', source: 'week', weight: 0.65, index: previousWeek.index });
       levels.push({ price: previousWeek.low, label: 'Prior week low', source: 'week', weight: 0.65, index: previousWeek.index });
     }
     // Higher-timeframe swings: the same candles, bucketed into 4h and 1h structures.
     for (const [name, bucket] of [['H4', 4 * HOUR], ['H1', HOUR]]) {
+      if (!allowed.higherTf) break;
       const series = aggregated(timed, bucket);
       if (series.length < 12) continue;
       for (const pivot of pivots(series, 2).slice(-6)) {
@@ -148,6 +150,6 @@ export function collectSourceLevels(bars, { priceStep = 0.1 } = {}) {
     }
   }
 
-  levels.push(...volumeProfile(indexed, priceStep));
+  if (allowed.volume) levels.push(...volumeProfile(indexed, priceStep));
   return levels.filter(level => finite(level.price) && level.price > 0);
 }

@@ -161,6 +161,24 @@ test('zone settings are validated',()=>{
  assert.throws(()=>validateZoneOptions({clusterAtr:9}),/clusterAtr/);
  assert.throws(()=>validateZoneOptions({pivotWidth:1.5}),/pivotWidth/);
  assert.equal(validateZoneOptions({minZones:9,maxZones:4}).minZones,4,'min never exceeds max');
+ assert.throws(()=>validateZoneOptions({atrPeriod:1}),/atrPeriod/);
+ assert.throws(()=>validateZoneOptions({reactionBars:200}),/reactionBars/);
+ assert.throws(()=>validateZoneOptions({maxDistanceAtr:0}),/maxDistanceAtr/);
+ assert.equal(validateZoneOptions({useSessions:false}).useSessions,false,'a source switched off survives validation');
+ assert.throws(()=>validateZoneOptions({useVolume:5}),/useVolume must be a boolean/);
+ assert.throws(()=>validateZoneOptions({useWeek:'нет'}),/useWeek must be a boolean/);
+});
+
+test('switching the volume source off removes its levels from the zones',()=>{
+ const bars=[];
+ let p=2650;
+ for(let i=0;i<480;i++){const o=p;p+=Math.sin(i/7)*1.6+Math.sin(i/29)*1.1;const h=Math.max(o,p)+0.6,l=Math.min(o,p)-0.6;bars.push({time:new Date(Date.UTC(2026,0,5)+i*900000).toISOString(),o,h,l,c:p,volume:8+(i%7)});}
+ const withVolume=detectLiquidityZones(bars,0.1,{minZones:3,maxZones:7});
+ const withoutVolume=detectLiquidityZones(bars,0.1,{minZones:3,maxZones:7,useVolume:false});
+ const volumeish=z=>/^(Volume|Value area)/.test(z.label)||z.sources.some(s=>/^(Volume|Value area)/.test(s));
+ assert.ok(withVolume.some(volumeish),'with the source on, the profile labels its levels');
+ assert.ok(!withoutVolume.some(volumeish),'with the source off, no volume level is drawn');
+ assert.ok(withoutVolume.length>=3,'the other sources still fill the zone count');
 });
 
 test('a broken level flips sides once and is dropped when price chops through it',()=>{

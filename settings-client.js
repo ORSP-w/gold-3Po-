@@ -1,7 +1,7 @@
 // Settings sheet (Vespera style): zone finder, MT5 drawing style and theme.
 // Every change is saved to /v1/settings right away; the MT5 indicator picks it up on its next refresh.
 const $ = id => document.getElementById(id);
-const DEFAULTS = { zones: { minZones: 3, maxZones: 7, pivotWidth: 2, atrPeriod: 14, clusterAtr: 0.35, zoneWidthAtr: 0.15, maxDistanceAtr: 15, reactionBars: 6, timeframeMinutes: 15 },
+const DEFAULTS = { zones: { minZones: 3, maxZones: 7, pivotWidth: 2, atrPeriod: 14, clusterAtr: 0.35, zoneWidthAtr: 0.15, maxDistanceAtr: 15, reactionBars: 6, timeframeMinutes: 15, usePriorDay: true, useSessions: true, useWeek: true, useHigherTf: true, useVolume: true },
   mt5: { buyColor: '#FF0000', sellColor: '#FF0000', lineStyle: 'solid', lineWidth: 2, fill: false, showLabels: true, showStrength: true }, ui: { theme: 'glass-dark' } };
 const SWATCHES = ['#FF0000', '#FF4D4D', '#FF8800', '#FFC799', '#FFD60A', '#30D158', '#0A84FF', '#BF5AF2', '#FFFFFF'];
 const TF_LABEL = { 5: '5m', 15: '15m', 30: '30m', 60: '1h', 240: '4h' };
@@ -37,13 +37,14 @@ function render() {
   const z = settings.zones, m = settings.mt5;
   const set = (id, v) => { if ($(id)) $(id).value = String(v); };
   set('setMinZones', z.minZones); set('setMaxZones', z.maxZones); set('setPivotWidth', z.pivotWidth); set('setClusterAtr', z.clusterAtr);
-  set('setZoneWidthAtr', z.zoneWidthAtr); set('setMaxDistanceAtr', z.maxDistanceAtr); set('setAtrPeriod', z.atrPeriod);
+  set('setZoneWidthAtr', z.zoneWidthAtr); set('setMaxDistanceAtr', z.maxDistanceAtr); set('setAtrPeriod', z.atrPeriod); set('setReactionBars', z.reactionBars);
   $('zoneCountValue') && ($('zoneCountValue').textContent = z.minZones === z.maxZones ? String(z.maxZones) : `${z.minZones}–${z.maxZones}`);
   $('pivotWidthValue') && ($('pivotWidthValue').textContent = `${z.pivotWidth} бар${z.pivotWidth === 1 ? '' : z.pivotWidth < 5 ? 'а' : 'ов'} с каждой стороны`);
   $('clusterAtrValue') && ($('clusterAtrValue').textContent = `${Number(z.clusterAtr).toFixed(2)} ATR`);
   $('zoneWidthAtrValue') && ($('zoneWidthAtrValue').textContent = `${Number(z.zoneWidthAtr).toFixed(2)} ATR`);
   $('maxDistanceAtrValue') && ($('maxDistanceAtrValue').textContent = `${z.maxDistanceAtr} ATR от цены`);
   $('atrPeriodValue') && ($('atrPeriodValue').textContent = String(z.atrPeriod));
+  $('reactionBarsValue') && ($('reactionBarsValue').textContent = `${z.reactionBars} бар${z.reactionBars === 1 ? '' : z.reactionBars < 5 ? 'а' : 'ов'}`);
   setSeg('setTimeframe', z.timeframeMinutes);
   set('setBuyColor', m.buyColor.toLowerCase()); set('setSellColor', m.sellColor.toLowerCase());
   setSeg('setLineStyle', m.lineStyle);
@@ -53,6 +54,7 @@ function render() {
   $('lineWidthNote') && ($('lineWidthNote').hidden = m.lineStyle === 'solid');
   document.querySelectorAll('.swatches').forEach(box => box.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.color === m[box.dataset.for === 'setBuyColor' ? 'buyColor' : 'sellColor'])));
   setToggle('setFill', m.fill); setToggle('setLabels', m.showLabels); setToggle('setStrength', m.showStrength);
+  setToggle('setSrcDay', z.usePriorDay); setToggle('setSrcSessions', z.useSessions); setToggle('setSrcWeek', z.useWeek); setToggle('setSrcTf', z.useHigherTf); setToggle('setSrcVolume', z.useVolume);
   setSeg('setTheme', settings.ui.theme);
   document.querySelectorAll('.timeframe-label').forEach(el => { el.textContent = `${TF_LABEL[z.timeframeMinutes] || z.timeframeMinutes + 'm'} · BROKER TICKS`; });
   preview();
@@ -111,7 +113,7 @@ function bind() {
     box.innerHTML = SWATCHES.map(c => `<button type="button" class="swatch" data-color="${c}" style="--swatch:${c}" title="${c}" aria-label="Цвет ${c}"></button>`).join('');
     box.addEventListener('click', e => { const b = e.target.closest('[data-color]'); if (b) change('mt5', box.dataset.for === 'setBuyColor' ? 'buyColor' : 'sellColor', b.dataset.color); });
   });
-  const ranges = { setMinZones: 'minZones', setMaxZones: 'maxZones', setPivotWidth: 'pivotWidth', setClusterAtr: 'clusterAtr', setZoneWidthAtr: 'zoneWidthAtr', setMaxDistanceAtr: 'maxDistanceAtr', setAtrPeriod: 'atrPeriod' };
+  const ranges = { setMinZones: 'minZones', setMaxZones: 'maxZones', setPivotWidth: 'pivotWidth', setClusterAtr: 'clusterAtr', setZoneWidthAtr: 'zoneWidthAtr', setMaxDistanceAtr: 'maxDistanceAtr', setAtrPeriod: 'atrPeriod', setReactionBars: 'reactionBars' };
   for (const [id, key] of Object.entries(ranges)) $(id)?.addEventListener('input', e => change('zones', key, Number(e.target.value)));
   $('setLineWidth')?.addEventListener('input', e => change('mt5', 'lineWidth', Number(e.target.value)));
   $('setBuyColor')?.addEventListener('input', e => change('mt5', 'buyColor', e.target.value.toUpperCase()));
@@ -120,6 +122,8 @@ function bind() {
   for (const [id, [section, key, cast]] of Object.entries(segs)) $(id)?.addEventListener('click', e => { const b = e.target.closest('button[data-value]'); if (b) change(section, key, cast(b.dataset.value)); });
   const toggles = { setFill: 'fill', setLabels: 'showLabels', setStrength: 'showStrength' };
   for (const [id, key] of Object.entries(toggles)) $(id)?.addEventListener('click', () => change('mt5', key, !settings.mt5[key]));
+  const zoneToggles = { setSrcDay: 'usePriorDay', setSrcSessions: 'useSessions', setSrcWeek: 'useWeek', setSrcTf: 'useHigherTf', setSrcVolume: 'useVolume' };
+  for (const [id, key] of Object.entries(zoneToggles)) $(id)?.addEventListener('click', () => change('zones', key, !settings.zones[key]));
   $('settingsTabs')?.addEventListener('click', e => {
     const b = e.target.closest('button[data-tab]'); if (!b) return;
     $('settingsTabs').querySelectorAll('button').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-selected', String(x === b)); });

@@ -135,6 +135,8 @@ try {
   await page.locator('#openSettings').click();
   await page.waitForSelector('#settingsDialog[open]');
   await page.locator('#setMaxZones').evaluate(el=>{el.value='4';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.locator('#setReactionBars').evaluate(el=>{el.value='10';el.dispatchEvent(new Event('input',{bubbles:true}));});
+  await page.locator('#setSrcVolume').click();
   await page.locator('#settingsTabs button[data-tab="mt5"]').click();
   await page.locator('#setLineStyle button[data-value="dash"]').click();
   await page.locator('#setSellColor').evaluate(el=>{el.value='#00ff00';el.dispatchEvent(new Event('input',{bubbles:true}));});
@@ -143,17 +145,22 @@ try {
   await page.locator('#settingsDone').click();
   const savedSettings = await (await fetch(base + '/v1/settings')).json();
   assert.equal(savedSettings.zones.maxZones, 4);
+  assert.equal(savedSettings.zones.reactionBars, 10, 'the reaction window comes from the sheet');
+  assert.equal(savedSettings.zones.useVolume, false, 'a switched-off source must reach the store');
+  assert.equal(savedSettings.zones.useSessions, true, 'untouched sources keep their default');
   assert.equal(savedSettings.mt5.lineStyle, 'dash');
   assert.equal(savedSettings.mt5.lineWidth, 1);
   assert.equal(savedSettings.mt5.sellColor, '#00FF00');
   const zonesForMt5 = await (await fetch(base + '/v1/chart/zones?symbol=XAUUSD')).json();
   assert.ok(zonesForMt5.zones.length <= 4, 'zone count setting must limit the MT5 payload');
+  assert.ok(!zonesForMt5.zones.some(z => /^(Volume|Value area)/.test(z.label) || (z.sources||[]).some(s => /^(Volume|Value area)/.test(s))), 'the volume profile is off, so no volume level may be drawn');
   assert.equal(zonesForMt5.style.lineStyle, 'dash', 'MT5 payload must carry the drawing style');
   await page.locator('#railNav .rail-item[data-go="settings"]').click();
   await page.waitForSelector('#settingsDialog[open]');
   await page.locator('#settingsReset').click();
   await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Настройки сброшены', null, { timeout:5000 });
   assert.equal((await (await fetch(base + '/v1/settings')).json()).mt5.sellColor, '#FF0000', 'reset restores red lines');
+  assert.equal((await (await fetch(base + '/v1/settings')).json()).zones.useVolume, true, 'reset turns the volume source back on');
   await page.locator('#settingsClose').click();
 
   await mkdir('artifacts', { recursive:true });
@@ -164,6 +171,30 @@ try {
   assert.ok(mobile.scrollWidth <= mobile.width, 'mobile page must not overflow horizontally');
   assert.ok(mobile.chart > 0 && mobile.footprint > 0, 'chart and footprint must remain visible on mobile');
   await page.screenshot({ path:'artifacts/market-lab-mobile.png', fullPage:true });
+  await page.locator('#openSettings').click();
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.locator('#settingsTabs button[data-tab="zones"]').click();
+  assert.ok(await page.locator('#settingsTabs button[data-tab="zones"]').evaluate(el => el.classList.contains('on')), 'the active tab must be the zone pane');
+  assert.ok(!(await page.locator('#settingsTabs button[data-tab="mt5"]').evaluate(el => el.classList.contains('on'))), 'only one tab is active');
+  const sheet = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll('#settingsDialog .settings-pane[data-pane="zones"] .row')];
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      rows: rows.length,
+      visible: rows.filter(row => row.getBoundingClientRect().height > 0).length,
+      toggles: document.querySelectorAll('#settingsDialog .settings-pane[data-pane="zones"] .toggle').length,
+      right: Math.max(...rows.map(row => row.getBoundingClientRect().right)),
+      sliders: [...document.querySelectorAll('#settingsDialog .settings-pane[data-pane="zones"] input[type="range"]')].filter(el => el.getBoundingClientRect().width > 0).length
+    };
+  });
+  assert.ok(sheet.overflow <= 0, 'the settings sheet must not overflow a phone width');
+  assert.ok(sheet.right > 0 && sheet.right <= 390, 'every source row must fit inside the phone viewport');
+  assert.equal(sheet.visible, sheet.rows, 'the zone pane is the one on screen');
+  assert.equal(sheet.toggles, 5, 'all five level sources are switchable');
+  assert.ok(sheet.sliders >= 7, 'every numeric zone option has a slider');
+  await page.screenshot({ path:'artifacts/settings-mobile.png' });
+  await page.locator('#settingsClose').click();
+  await page.waitForTimeout(150);
   await page.setViewportSize({ width: 3840, height: 2160 });
   await page.waitForTimeout(400);
   const wide = await page.evaluate(() => ({

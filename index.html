@@ -45,6 +45,14 @@
 <div class="field"><div class="field-label">Минимальная толщина зоны <b id="zoneWidthAtrValue"></b></div><div class="range-row"><input type="range" id="setZoneWidthAtr" min="0.05" max="0.6" step="0.01"></div></div>
 <div class="field"><div class="field-label">Искать не дальше <b id="maxDistanceAtrValue"></b></div><div class="range-row"><input type="range" id="setMaxDistanceAtr" min="3" max="40" step="1"></div></div>
 <div class="field"><div class="field-label">Период ATR <b id="atrPeriodValue"></b></div><div class="range-row"><input type="range" id="setAtrPeriod" min="5" max="50" step="1"></div></div>
+<div class="field"><div class="field-label">Баров на замер реакции <b id="reactionBarsValue"></b></div><div class="range-row"><input type="range" id="setReactionBars" min="2" max="20" step="1"></div><small>Сколько свечей после свинга учитывать, когда измеряется сила отскока.</small></div>
+<div class="settings-subhead">Источники уровней</div>
+<div class="row"><span>Прошлый день (макс / мин)</span><button type="button" class="toggle" id="setSrcDay" aria-pressed="true"><span class="knob"></span></button></div>
+<div class="row"><span>Сессии: Азия, Лондон, Нью-Йорк</span><button type="button" class="toggle" id="setSrcSessions" aria-pressed="true"><span class="knob"></span></button></div>
+<div class="row"><span>Неделя: открытие и прошлая неделя</span><button type="button" class="toggle" id="setSrcWeek" aria-pressed="true"><span class="knob"></span></button></div>
+<div class="row"><span>Свинги старших ТФ (H1 / H4)</span><button type="button" class="toggle" id="setSrcTf" aria-pressed="true"><span class="knob"></span></button></div>
+<div class="row"><span>Профиль объёма (POC и зона стоимости)</span><button type="button" class="toggle" id="setSrcVolume" aria-pressed="true"><span class="knob"></span></button></div>
+<p class="settings-hint">Отключённый источник перестаёт участвовать в поиске зон и в оценке совпадений. Свинги всегда остаются основой.</p>
 </section>
 <section class="settings-pane" data-pane="mt5" hidden>
 <div class="style-preview" aria-hidden="true"><svg id="stylePreview" viewBox="0 0 320 96" preserveAspectRatio="none"></svg></div>

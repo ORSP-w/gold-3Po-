@@ -211,3 +211,5 @@ html[data-theme="glass-dark"]{--v-accent:#ffc799;--v-cta-ink:#171310}
 html[data-theme="glass-light"]{--v-accent:#d9a273;--v-cta-ink:#1a1611}
 .primary-button,.research-button.primary{box-shadow:0 6px 24px rgba(255,199,153,.22)}
 .primary-button:hover,.research-button.primary:hover:not(:disabled){background:#ffd9b8;box-shadow:0 8px 30px rgba(255,199,153,.32)}
+
+.settings-subhead{margin:18px 0 8px;font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}

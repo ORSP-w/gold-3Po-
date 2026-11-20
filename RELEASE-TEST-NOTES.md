@@ -17,7 +17,7 @@ The application bundles Electron and its Chromium runtime. A separate Node.js in
 4. Minimize and close the window: the app must stay in the tray and keep the API alive; tray **Exit** must stop it.
 5. Verify no order is ever sent: the connector exposes no trading operations.
 6. Glass design: panels, buttons and dialogs render with the Vespera-style translucent glass surfaces; all controls remain clickable at desktop and mobile widths.
-7. Settings (⚙ in the top bar or the rail): Zones tab — min/max zone count (default 3–7), timeframe, swing sensitivity, cluster width, zone thickness, search distance, ATR period. The chart, `/v1/chart/zones` and the MT5 indicator must follow them.
+7. Settings (⚙ in the top bar or the rail): Zones tab — min/max zone count (default 3–7), timeframe, swing sensitivity, cluster width, zone thickness, search distance, ATR period, the number of bars used to measure a reaction, and a switch for each level source (previous day, sessions, week, higher timeframes, volume profile). The chart, `/v1/chart/zones` and the MT5 indicator must follow them.
 8. MT5 drawing: by default zones are red solid lines (width 2). Change colour, line style, width, fill, labels and strength % in **Отрисовка в MT5**; the attached Gold3PoLevels indicator must update within ~5 s without being re-attached. Dashed/dotted styles are width 1 (MT5 limitation).
 9. Interface tab: switch between the dark and light Vespera themes; the choice persists after restart.
 
@@ -30,6 +30,7 @@ Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local 
 3. Reaction evidence is measured, not assumed: `zone-reaction.js` walks the history and counts, per zone, how many touches held (price moved 0.5 ATR away from the edge) versus closed through it (0.25 ATR). The panel footer sums this as «N удержаний из M касаний».
 4. That measurement uses the same history the zones were built from, so it is evidence about the past, not a forecast. It is not a calibrated probability and must not be read as one.
 5. The chart now fills the panel at any window size, including 4K; the workspace widens above 1800 px instead of staying at 1680 px. Primary buttons use the gold C-3PO accent in both themes.
+6. Every source has its own switch in **Зоны → Источники уровней**. Turning one off removes its levels from the search and from the confluence count; switches are validated server-side (`useVolume must be a boolean`), so a malformed request is rejected instead of silently ignored. Swing pivots always stay as the base.
 
 ## Activate the licence
 

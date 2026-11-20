@@ -83,16 +83,27 @@ export const DEFAULT_ZONE_OPTIONS = Object.freeze({
   clusterAtr: 0.35,     // swings closer than this many ATR form one zone
   zoneWidthAtr: 0.15,   // minimum zone thickness in ATR
   maxDistanceAtr: 15,   // ignore levels farther than this from the current price
-  reactionBars: 6       // bars after a swing used to measure how hard price reacted
+  reactionBars: 6,      // bars after a swing used to measure how hard price reacted
+  usePriorDay: true,    // include the previous completed day's extremes
+  useSessions: true,    // include Asia / London / New York session extremes
+  useWeek: true,        // include the weekly open and the previous week's extremes
+  useHigherTf: true,    // include H1/H4 swings aggregated from the same candles
+  useVolume: true       // include the volume profile (POC, value-area edges)
 });
 
 export function validateZoneOptions(input = {}) {
   const o = { ...DEFAULT_ZONE_OPTIONS };
-  for (const [key, value] of Object.entries(input || {})) if (key in o && value !== undefined && value !== null) o[key] = Number(value);
+  for (const [key, value] of Object.entries(input || {})) {
+    if (!(key in o) || value === undefined || value === null) continue;
+    o[key] = typeof value === 'boolean' ? value : Number(value);
+  }
   const int = (k, lo, hi) => { if (!Number.isInteger(o[k]) || o[k] < lo || o[k] > hi) throw new TypeError(`${k} must be an integer ${lo}..${hi}`); };
   const num = (k, lo, hi) => { if (!finite(o[k]) || o[k] < lo || o[k] > hi) throw new TypeError(`${k} must be between ${lo} and ${hi}`); };
   int('minZones', 1, 20); int('maxZones', 1, 20); int('pivotWidth', 1, 6); int('atrPeriod', 2, 200); int('reactionBars', 1, 50);
   num('clusterAtr', 0.05, 3); num('zoneWidthAtr', 0.02, 2); num('maxDistanceAtr', 1, 100);
+  for (const flag of ['usePriorDay', 'useSessions', 'useWeek', 'useHigherTf', 'useVolume']) {
+    if (typeof o[flag] !== 'boolean') throw new TypeError(`${flag} must be a boolean`);
+  }
   if (o.minZones > o.maxZones) o.minZones = o.maxZones;
   return o;
 }
@@ -197,7 +208,7 @@ export function detectLiquidityZones(bars, priceStep = 0.1, options = {}) {
   }
 
   // Confluence: levels several independent sources agree on outrank a bare swing shape.
-  const sources = collectSourceLevels(closed, { priceStep });
+  const sources = collectSourceLevels(closed, { priceStep, use: { priorDay: o.usePriorDay, sessions: o.useSessions, week: o.useWeek, higherTf: o.useHigherTf, volume: o.useVolume } });
   for (const z of candidates) {
     const agreed = sources.filter(s => Math.abs(s.price - z.mid) <= Math.max(pad, tolerance * 1.5));
     z.sources = [...new Set(agreed.map(s => s.label))].slice(0, 3);

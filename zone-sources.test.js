@@ -84,6 +84,26 @@ test('zones report which independent sources agree with them', () => {
   for (const zone of zones) assert.ok(zone.factors.confluence >= 0 && zone.factors.confluence <= 1);
 });
 
+test('each level source can be switched off on its own', () => {
+  const bars = history();
+  const all = collectSourceLevels(bars, { priceStep: 0.1 }).map(level => level.label);
+
+  const noSessions = collectSourceLevels(bars, { priceStep: 0.1, use: { sessions: false } }).map(level => level.label);
+  assert.ok(!noSessions.some(label => /^(Asia|London|New York)/.test(label)), 'session levels must disappear when the switch is off');
+  assert.ok(noSessions.includes('Prior day high') && noSessions.includes('Volume POC'), 'the other sources keep working');
+  assert.ok(noSessions.length < all.length);
+
+  const noVolume = collectSourceLevels(bars, { priceStep: 0.1, use: { volume: false } }).map(level => level.label);
+  assert.ok(!noVolume.some(label => /^(Volume|Value area)/.test(label)), 'the volume profile must disappear when the switch is off');
+  assert.ok(noVolume.includes('Prior day high') && noVolume.includes('Weekly open'));
+
+  const noCalendar = collectSourceLevels(bars, { priceStep: 0.1, use: { priorDay: false, sessions: false, week: false, higherTf: false } });
+  assert.ok(noCalendar.length > 0 && noCalendar.every(level => /^(Volume|Value area)/.test(level.label)), 'only the volume profile is left when every other source is off');
+
+  const none = collectSourceLevels(bars, { priceStep: 0.1, use: { priorDay: false, sessions: false, week: false, higherTf: false, volume: false } });
+  assert.deepEqual(none, [], 'everything switched off yields no invented levels');
+});
+
 test('invalid input is rejected', () => {
   assert.deepEqual(collectSourceLevels([]), []);
   assert.throws(() => collectSourceLevels(history(), { priceStep: 0 }), /Invalid source level/);
