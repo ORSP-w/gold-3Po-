@@ -32,6 +32,16 @@ test('every page asset is served by the local server and packaged', async () => 
   }
 });
 
+test('every module the browser imports is served, not only packaged', async () => {
+  const server = await readFile(new URL('./server.js', import.meta.url), 'utf8');
+  const client = new Set([...await localImports('app.js')]);
+  for (const m of html.matchAll(/<script[^>]+src="\.\/([^"]+)"/g)) for (const f of await localImports(m[1])) client.add(f);
+  for (const f of client) {
+    assert.ok(server.includes(`'/${f}'`), `${f} is imported by the page but missing from server.js STATIC_FILES`);
+    assert.ok(files.includes(f), `${f} is imported by the page but missing from build.files`);
+  }
+});
+
 test('the desktop app stores zone/MT5 settings in userData, apart from its own settings.json', async () => {
   const main = await readFile(new URL('./electron/main.js', import.meta.url), 'utf8');
   assert.match(main, /createSettingsStore\(\{ file: path\.join\(userDataPath, 'zone-settings\.json'\) \}\)/);

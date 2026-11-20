@@ -1,6 +1,7 @@
 import { barDelta, totalVolume } from './market-data.js';
 import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
+import { chartScale } from './chart-scale.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
 let bars=[], zones=[], selected=-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
@@ -18,10 +19,11 @@ function renderChart(){
  if(!bars.length){chart.innerHTML='';chart.setAttribute('viewBox','0 0 1000 390');chart.style.width='100%';setEmptyState(true);return;}
  setEmptyState(false);
  const left=64;
- // The chart fills the panel at any window width (up to 4K): the grid and zones span the full width.
+ // The chart fills the panel at any window width (up to 4K) and compresses history into it: a bar
+ // may shrink to 3px on a laptop panel and 2px on a 4K one before the series becomes a scroll strip.
  const wrapWidth=Math.max(320,Math.round((chart.parentElement?.clientWidth||960)-16));
- const width=Math.max(wrapWidth-left-85,bars.length*6);
- const step=width/Math.max(1,bars.length), svgWidth=left+width+85;
+ const scale=chartScale({panelWidth:wrapWidth,bars:bars.length,left});
+ const width=scale.width, step=scale.step, svgWidth=scale.svgWidth;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length){setEmptyState(true);return;}
  const min=Math.min(...allPrices)-1,max=Math.max(...allPrices)+1,x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(2,Math.min(26,step*.62));
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);

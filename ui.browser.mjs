@@ -221,7 +221,16 @@ try {
   await page.screenshot({ path:'artifacts/settings-mobile.png' });
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
+  // Плотная история: на 4K панель должна вмещать серию, а не растягивать её в ленту.
+  const denseTicks = Array.from({ length: 600 }, (_, i) => {
+    const at = new Date(Date.now() - (600 - i) * 15 * 60000);
+    const px = 2650 + Math.sin(i / 9) * 4 + i * 0.02;
+    return { timestamp: at.toISOString(), sequence: 100000 + i, bid: +px.toFixed(2), ask: +(px + 0.2).toFixed(2), last: +(px + 0.1).toFixed(2), tickVolume: 1, realVolume: 0, flags: 0 };
+  });
+  const denseResponse = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: denseTicks }) });
+  assert.equal(denseResponse.status, 202, 'dense history fixture should be accepted');
   await page.setViewportSize({ width: 3840, height: 2160 });
+  await page.waitForFunction(() => document.querySelectorAll('.candle').length >= 600, null, { timeout: 8000 });
   await page.waitForTimeout(400);
   const wide = await page.evaluate(() => ({
     overflow: document.documentElement.scrollWidth - innerWidth,
@@ -233,6 +242,8 @@ try {
   assert.ok(wide.overflow <= 0, '4K must not overflow horizontally');
   assert.ok(wide.content > 2000, '4K workspace must use the extra width instead of a 1680px strip');
   assert.ok(wide.chart >= wide.wrap * 0.85, 'chart must fill the panel on wide screens');
+  assert.ok(wide.chart <= wide.wrap * 1.05, 'dense history must be compressed into the 4K panel instead of a multi-screen scroll strip');
+  assert.ok(wide.chart / wide.bars >= 2, 'bars never get thinner than the 4K pitch');
   await page.screenshot({ path:'artifacts/market-lab-4k.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
   process.stdout.write('Browser checks passed: empty state, chart, footprint (POC, value area, profile, delta row, live tick), zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');

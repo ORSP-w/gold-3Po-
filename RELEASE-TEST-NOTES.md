@@ -29,7 +29,7 @@ Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local 
 2. When several sources land inside one zone, its strength rises (the `confluence` factor). A zone row shows the reaction evidence, and hovering it lists the sources that agree.
 3. Reaction evidence is measured, not assumed: `zone-reaction.js` walks the history and counts, per zone, how many touches held (price moved 0.5 ATR away from the edge) versus closed through it (0.25 ATR). The panel footer sums this as «N удержаний из M касаний».
 4. That measurement uses the same history the zones were built from, so it is evidence about the past, not a forecast. It is not a calibrated probability and must not be read as one.
-5. The chart now fills the panel at any window size, including 4K; the workspace widens above 1800 px instead of staying at 1680 px. Primary buttons use the gold C-3PO accent in both themes.
+5. The chart fills the panel at any window size, including 4K; the workspace widens above 1800 px instead of staying at 1680 px. History is compressed into the panel instead of scrolling out of sight: `chart-scale.js` lets a candle shrink to 3 px of pitch on a laptop panel and 2 px on a 4K one, and only a series denser than that becomes a horizontal strip. Primary buttons use the gold C-3PO accent in both themes.
 6. Every source has its own switch in **Зоны → Источники уровней**. Turning one off removes its levels from the search and from the confluence count; switches are validated server-side (`useVolume must be a boolean`), so a malformed request is rejected instead of silently ignored. Swing pivots always stay as the base.
 
 ## Footprint: what the numbers mean (v0.8.0)
