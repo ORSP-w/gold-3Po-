@@ -3,7 +3,7 @@
 Two integration paths exist:
 
 - **App-side connection (recommended):** sign in from the GOLD-3Po window
-  («Подключить MT5»). The bundled standalone connector (`mt5-runtime/gold3po-mt5.exe`,
+  («Подключить MT5»). The bundled standalone connector (`mt5-runtime/gold3po-mt5/gold3po-mt5.exe`,
   built from `mt5_connector.py`) attaches to your broker terminal via the official
   MetaTrader5 Python API, streams gold ticks into the local API and publishes
   dynamic levels to `Common\Files\GOLD3PO\<SYMBOL>.csv`. The separate custom

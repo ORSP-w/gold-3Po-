@@ -198,3 +198,15 @@ test('session rejects malformed connect input without starting a worker', async 
   await assert.rejects(() => session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'EURUSD' }), /Заполните/);
   assert.equal(started, false);
 });
+
+test('a connector that is not on disk says so, and names the path', async () => {
+  const session = createMt5Session({
+    workerCommand: join('/definitely-missing', 'gold3po-mt5.exe'), workerArgs: [],
+    apiOrigin: 'http://127.0.0.1:9', token: 't', publish: async () => {}
+  });
+  const state = await session.connect({ terminalPath: '/terminals/terminal64.exe', login: '5000123', password: 'secret', server: 'Broker-Demo', symbol: 'XAUUSD' });
+  assert.equal(state.state, 'offline');
+  assert.match(state.message, /Модуль подключения MT5 не найден: .*gold3po-mt5\.exe/, 'the window must name the missing module');
+  assert.match(state.message, /переустановите приложение/, 'and not send the user looking for a MetaTrader5 package to install');
+  assert.doesNotMatch(state.message, /Установите официальный пакет/, 'the old message blamed the user for our packaging');
+});

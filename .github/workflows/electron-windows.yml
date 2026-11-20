@@ -41,6 +41,14 @@ jobs:
         with:
           node-version: 22
 
+      - name: Read the application version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if (-not $version) { throw "package.json has no version." }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Install Electron build dependencies
         shell: pwsh
         run: |
@@ -80,7 +88,7 @@ jobs:
 
           @(
             "GOLD-3Po Market Lab Electron Windows installer",
-            "Version: 0.7.0",
+            "Version: ${{ steps.version.outputs.value }}",
             "Commit: $env:GITHUB_SHA",
             "Target: Windows x64",
             "Framework: Electron",
@@ -120,6 +128,14 @@ jobs:
           if (-not (Test-Path -LiteralPath (Join-Path $installDir "resources\gold3po-icon.ico"))) {
             throw "The packaged C-3PO icon resource is missing."
           }
+          $connector = Join-Path $installDir "resources\mt5-runtime\gold3po-mt5\gold3po-mt5.exe"
+          if (-not (Test-Path -LiteralPath $connector)) {
+            throw "The packaged MT5 connector is missing: $connector"
+          }
+          $probe = '{""id"":1,""op"":""ping""}' | & $connector 2>&1
+          if ($probe -notmatch '"ok":false' -or $probe -notmatch 'unknown_operation') {
+            throw ("The packaged MT5 connector did not answer: " + $probe)
+          }
 
           $stdout = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke.stdout.log"
           $stderr = Join-Path $env:RUNNER_TEMP "GOLD3Po-Electron-Smoke.stderr.log"
@@ -135,12 +151,12 @@ jobs:
             throw ("Packaged Electron application smoke test failed. Exit code: " + $smoke.ExitCode + [Environment]::NewLine + $out + [Environment]::NewLine + $err)
           }
 
-          Write-Host "PASS: installer installs and the packaged Electron app starts its local API on port 8787 and serves the UI."
+          Write-Host "PASS: installer installs, the packaged MT5 connector runs, and the packaged Electron app starts its local API on port 8787 and serves the UI."
 
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GOLD-3Po-Electron-Windows-Setup-0.7.0
+          name: GOLD-3Po-Electron-Windows-Setup-${{ steps.version.outputs.value }}
           path: release/*
           if-no-files-found: error
           retention-days: 30
@@ -148,8 +164,8 @@ jobs:
       - name: Publish GitHub pre-release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.7.0.${{ github.run_number }}
-          name: GOLD-3Po Market Lab v0.7.0
+          tag_name: v${{ steps.version.outputs.value }}.${{ github.run_number }}
+          name: GOLD-3Po Market Lab v${{ steps.version.outputs.value }}
           target_commitish: ${{ github.sha }}
           prerelease: true
           generate_release_notes: true

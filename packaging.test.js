@@ -47,3 +47,22 @@ test('the desktop app stores zone/MT5 settings in userData, apart from its own s
   assert.match(main, /createSettingsStore\(\{ file: path\.join\(userDataPath, 'zone-settings\.json'\) \}\)/);
   assert.match(main, /createMarketServer\(\{[\s\S]*settingsStore[\s\S]*\}\)/);
 });
+
+test('the packaged app looks for the MT5 connector where the build really puts it', async () => {
+  const main = await readFile(new URL('./electron/main.js', import.meta.url), 'utf8');
+  const workflow = await readFile(new URL('./.github/workflows/electron-windows.yml', import.meta.url), 'utf8');
+  const { WORKER_LAYOUTS } = await import('./electron/mt5-runtime.js');
+  assert.match(main, /workerCommand: app\.isPackaged \? workerPath\(process\.resourcesPath\) : 'py\.exe'/,
+    'the packaged worker path must come from mt5-runtime.js, not from a hand-written string');
+  const name = workflow.match(/--name\s+(\S+)/)?.[1];
+  const dist = workflow.match(/--distpath\s+(\S+)/)?.[1];
+  assert.ok(name && dist, 'the workflow must build the connector with --name and --distpath');
+  const copied = pkg.build.extraResources.find(r => r.from === dist);
+  assert.ok(copied, `extraResources must copy ${dist} into the installer`);
+  const onedir = /--onedir\b/.test(workflow);
+  const expected = [...copied.to.split('/'), ...(onedir ? [name, name + '.exe'] : [name + '.exe'])];
+  assert.ok(WORKER_LAYOUTS.some(parts => parts.join('/') === expected.join('/')),
+    `the app does not look for ${expected.join('/')}, so the installed build cannot start the connector`);
+  assert.ok(workflow.includes(`resources\\mt5-runtime\\${onedir ? name + '\\' : ''}${name}.exe`),
+    'the CI smoke test must check the connector landed in the installed application');
+});

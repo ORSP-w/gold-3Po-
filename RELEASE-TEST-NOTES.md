@@ -7,7 +7,7 @@
 3. Leave the launch option enabled or start **GOLD-3Po Market Lab** from the desktop shortcut or Start Menu.
 4. The application opens in its own Electron window. It starts its local market API on `127.0.0.1:8787`.
 
-The application bundles Electron and its Chromium runtime. A separate Node.js installation, browser window, PowerShell command or ZIP extraction is not required. The MT5 connector is bundled as a standalone executable (`resources\mt5-runtime\gold3po-mt5.exe`); a separate Python installation is not required.
+The application bundles Electron and its Chromium runtime. A separate Node.js installation, browser window, PowerShell command or ZIP extraction is not required. The MT5 connector is bundled as a standalone executable (`resources\mt5-runtime\gold3po-mt5\gold3po-mt5.exe`); a separate Python installation is not required.
 
 ## MT5 connection, indicator and tray (v0.5.0)
 

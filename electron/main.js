@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, shell, Tray } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { createMt5Session } from './mt5-session.js';
+import { workerPath } from './mt5-runtime.js';
 import { installIndicator } from './mt5-indicator.js';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -37,7 +38,7 @@ const adapterDir = app.isPackaged ? path.join(process.resourcesPath, 'adapters',
 
 function registerMt5Ipc() {
   mt5 = createMt5Session({
-    workerCommand: app.isPackaged ? path.join(process.resourcesPath, 'mt5-runtime', 'gold3po-mt5.exe') : 'py.exe',
+    workerCommand: app.isPackaged ? workerPath(process.resourcesPath) : 'py.exe',
     workerArgs: app.isPackaged ? [] : ['-3.10', path.join(adapterDir, 'mt5_connector.py')],
     apiOrigin: localOrigin,
     token: marketIngestToken

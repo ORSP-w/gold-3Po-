@@ -5,10 +5,13 @@ import { publishSnapshot } from './mt5-snapshot.js';
 
 function startWorker(command, args) {
   let child;
-  try { child = spawn(command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] }); }
-  catch { throw new Error('Не удалось запустить модуль подключения MT5.'); }
+  try { child = spawn(command, args, { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] }); }
+  catch (error) { throw new Error(`Не удалось запустить модуль подключения MT5: ${error?.message || command}.`); }
   const lines = createInterface({ input: child.stdout });
-  let stopped = false, current, id = 0;
+  let stopped = false, current, id = 0, trouble = '';
+  // The connector silences its own output, so anything here comes from the frozen bootloader: a missing library,
+  // a broken build. Without it the window could only say «модуль закрылся» and leave the engineer guessing.
+  child.stderr?.on('data', chunk => { trouble = (trouble + chunk).slice(-600); });
   function stop(message = 'Соединение с модулем MT5 закрыто.') {
     if (stopped) return;
     stopped = true;
@@ -18,8 +21,13 @@ function startWorker(command, args) {
     lines.close();
     child.kill();
   }
-  child.once('error', () => stop('Не удалось запустить модуль MT5. Установите официальный пакет MetaTrader5 или обновите приложение.'));
-  child.once('exit', () => stop());
+  child.once('error', error => stop(error?.code === 'ENOENT'
+    ? `Модуль подключения MT5 не найден: ${command}. Эта сборка GOLD-3Po пришла без модуля — переустановите приложение.`
+    : `Не удалось запустить модуль подключения MT5: ${error?.message || command}.`));
+  child.once('exit', () => {
+    const why = trouble.trim().split('\n').slice(-3).join(' ').trim();
+    stop(why ? `Модуль MT5 закрылся: ${why}` : undefined);
+  });
   child.stdin.on('error', () => stop());
   lines.on('line', line => {
     let result;
