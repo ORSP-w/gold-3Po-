@@ -10,3 +10,4 @@ pnpm-lock.yaml
 pnpm-workspace.yaml
 smoke-*.log
 
+tools/license-issued.jsonl

@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GOLD-3Po — генератор лицензий</title>
+<style>
+:root{color-scheme:dark;--bg:#0d0d0f;--panel:#161618;--panel-2:#1c1c1f;--line:#2a2a2e;--text:#f5f5f5;--muted:#9a9aa2;--gold:#ffc799;--cyan:#99ffe4;--red:#ff8080;--radius:14px;--mono:ui-monospace,'Cascadia Mono',Consolas,monospace;--sans:'Manrope','Segoe UI',system-ui,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(1200px 600px at 15% -10%,#1d1a16 0%,transparent 60%),radial-gradient(900px 500px at 95% 0%,#101a18 0%,transparent 55%),var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.45}
+.wrap{max-width:1560px;margin:0 auto;padding:clamp(18px,2.4vw,40px)}
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:clamp(16px,2vw,28px)}
+.logo{width:46px;height:46px;border-radius:13px;border:1px solid var(--gold);display:grid;place-items:center;font-weight:800;color:var(--gold);background:linear-gradient(150deg,#241f18,#141416);flex:none}
+h1{font-size:clamp(19px,1.7vw,25px);margin:0;letter-spacing:-.4px}
+.sub{color:var(--muted);font-size:13px;margin-top:3px}
+.pill{margin-left:auto;display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:8px 14px;font-size:12.5px;color:var(--muted);background:rgba(22,22,24,.8)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--red);box-shadow:0 0 10px currentColor}
+.pill.ok i{background:var(--cyan)}
+.grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:clamp(14px,1.6vw,24px);align-items:start}
+@media(max-width:1080px){.grid{grid-template-columns:minmax(0,1fr)}.pill{margin-left:0}}
+.card{background:linear-gradient(160deg,rgba(28,28,31,.96),rgba(20,20,22,.98));border:1px solid var(--line);border-radius:var(--radius);padding:clamp(16px,1.5vw,24px);box-shadow:0 18px 50px #0006}
+.card + .card{margin-top:clamp(14px,1.6vw,24px)}
+h2{font-size:14px;letter-spacing:.02em;margin:0 0 14px;color:#fff;font-weight:700}
+label{display:block;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+input,select,textarea,button{font-family:inherit;font-size:15px}
+input,select,textarea{width:100%;background:#111113;border:1px solid var(--line);border-radius:10px;color:var(--text);padding:12px 13px;min-height:44px;outline:none;transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 0 3px #ffc79922}
+input.bad{border-color:var(--red)}
+.field{margin-bottom:14px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.row-3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media(max-width:560px){.row,.row-3{grid-template-columns:minmax(0,1fr)}}
+.presets{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.presets button{min-height:36px;padding:0 14px;border-radius:999px;border:1px solid var(--line);background:#141416;color:var(--muted);cursor:pointer;transition:.15s}
+.presets button:hover{border-color:var(--gold);color:var(--text)}
+.presets button.on{background:linear-gradient(120deg,var(--gold),#ffd9b8);border-color:transparent;color:#171310;font-weight:700}
+.primary{width:100%;min-height:52px;border:0;border-radius:12px;background:linear-gradient(120deg,var(--gold),#ffd9b8);color:#171310;font-weight:800;font-size:15.5px;cursor:pointer;transition:transform .12s,filter .15s}
+.primary:hover{transform:translateY(-1px);filter:brightness(1.05)}
+.primary:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.ghost{min-height:40px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:#141416;color:var(--text);cursor:pointer;transition:.15s}
+.ghost:hover{border-color:var(--gold)}
+.hint{font-size:12.5px;color:var(--muted);margin-top:7px;min-height:18px}
+.hint.err{color:var(--red)}
+.hint.ok{color:var(--cyan)}
+.key{font-family:var(--mono);font-size:13px;line-height:1.6;word-break:break-all;background:#0f0f11;border:1px solid var(--line);border-radius:10px;padding:14px;min-height:96px;white-space:pre-wrap}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+.meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;margin-top:14px;font-size:13px}
+.meta div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed #232326;padding-bottom:6px}
+.meta span{color:var(--muted)}
+.meta b{font-family:var(--mono);font-weight:500}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th,td{text-align:left;padding:9px 8px;border-bottom:1px solid #202023;white-space:nowrap}
+th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+td.mono{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.scroll{overflow:auto;max-height:340px}
+.banner{border:1px solid #5a3b2a;background:#2a1c14;border-radius:12px;padding:14px 16px;margin-bottom:16px;font-size:13.5px;color:#ffd9b8}
+.banner.err{border-color:#6b2f2f;background:#2a1616;color:#ffc9c9}
+.banner code{font-family:var(--mono);font-size:12px;word-break:break-all}
+.empty{color:var(--muted);font-size:13px;padding:10px 0}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);background:#242428;border:1px solid #ffc79955;border-radius:10px;padding:12px 18px;font-size:13.5px;opacity:0;pointer-events:none;transition:.2s}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="logo">3Po</div>
+  <div>
+    <h1>Генератор лицензий GOLD-3Po</h1>
+    <div class="sub">Ключ привязан к ID компьютера клиента. Подпись Ed25519, без интернета.</div>
+  </div>
+  <div class="pill" id="keyStatus"><i></i><span>Проверяем ключ…</span></div>
+</header>
+
+<div id="keyBanner"></div>
+
+<div class="grid">
+  <div>
+    <section class="card">
+      <h2>Новая лицензия</h2>
+      <div class="field">
+        <label for="machine">ID компьютера клиента</label>
+        <input id="machine" inputmode="text" autocomplete="off" spellcheck="false" placeholder="A1B2-C3D4-E5F6-7890" maxlength="19">
+        <div class="hint" id="machineHint">16 шестнадцатеричных символов. Дефисы можно не ставить.</div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label for="days">Срок, дней</label>
+          <input id="days" type="number" min="1" max="9999" step="1" value="30">
+          <div class="presets" id="presets"></div>
+        </div>
+        <div class="field">
+          <label for="edition">Тип лицензии</label>
+          <select id="edition">
+            <option value="pro">pro — полная</option>
+            <option value="trial">trial — пробная</option>
+            <option value="vip">vip — расширенная</option>
+          </select>
+          <div class="field" style="margin-top:14px">
+            <label for="note">Пометка (кому выдан)</label>
+            <input id="note" maxlength="120" placeholder="Иван, RoboForex, демо">
+          </div>
+        </div>
+      </div>
+      <button class="primary" id="issue">Сгенерировать ключ</button>
+      <div class="hint" id="issueHint"></div>
+    </section>
+
+    <section class="card">
+      <h2>Проверить ключ</h2>
+      <div class="field">
+        <label for="inspectKey">Вставьте ключ GOLD1.…</label>
+        <textarea id="inspectKey" rows="3" spellcheck="false" placeholder="GOLD1.…"></textarea>
+      </div>
+      <button class="ghost" id="inspect">Проверить</button>
+      <div class="key" id="inspectOut" style="margin-top:12px;min-height:64px">Проверка покажет содержимое ключа и подпись.</div>
+    </section>
+  </div>
+
+  <div>
+    <section class="card">
+      <h2>Готовый ключ</h2>
+      <div class="key" id="result">Сгенерируйте ключ — он появится здесь целиком.</div>
+      <div class="actions">
+        <button class="ghost" id="copyKey">Скопировать ключ</button>
+        <button class="ghost" id="copyMessage">Скопировать текст для клиента</button>
+      </div>
+      <div class="meta" id="resultMeta"></div>
+    </section>
+
+    <section class="card">
+      <h2>Последние выдачи</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Выдан</th><th>ID</th><th>Тип</th><th>Дней</th><th>Кому</th><th></th></tr></thead>
+          <tbody id="recent"><tr><td colspan="6" class="empty">Пока ничего не выдано.</td></tr></tbody>
+        </table>
+      </div>
+      <div class="actions"><button class="ghost" id="exportCsv">Скачать журнал CSV</button></div>
+    </section>
+  </div>
+</div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const TOKEN = '__TOKEN__';
+const $ = id => document.getElementById(id);
+let lastRecord = null;
+let keyReady = false;
+
+function toast(text) {
+  const node = $('toast');
+  node.textContent = text;
+  node.classList.add('on');
+  clearTimeout(node._timer);
+  node._timer = setTimeout(() => node.classList.remove('on'), 1900);
+}
+async function api(path, method = 'GET', body) {
+  const response = await fetch(path, {
+    method,
+    headers: { 'x-license-token': TOKEN, ...(body ? { 'content-type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || ('HTTP ' + response.status));
+  return data;
+}
+function formatMachine(value) {
+  const hex = String(value || '').replace(/[^0-9a-fA-F]/g, '').slice(0, 16).toUpperCase();
+  return hex.replace(/(.{4})(?=.)/g, '$1-');
+}
+function compactMachine() {
+  return String($('machine').value || '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+}
+function validateMachine() {
+  const hex = compactMachine();
+  const ok = hex.length === 16;
+  $('machine').classList.toggle('bad', hex.length > 0 && !ok);
+  $('machineHint').className = 'hint' + (hex.length === 0 ? '' : ok ? ' ok' : ' err');
+  $('machineHint').textContent = hex.length === 0
+    ? '16 шестнадцатеричных символов. Дефисы можно не ставить.'
+    : ok ? 'ID распознан: ' + hex.match(/.{4}/g).join('-') : 'Нужно ровно 16 символов, сейчас ' + hex.length + '.';
+  $('issue').disabled = !ok || !keyReady;
+  return ok;
+}
+async function refresh(state) {
+  const data = state || await api('/api/state');
+  keyReady = Boolean(data.hasPrivateKey && data.matchesApp);
+  const status = $('keyStatus');
+  status.classList.toggle('ok', keyReady);
+  status.querySelector('span').textContent = !data.hasPrivateKey ? 'Приватного ключа нет' : data.matchesApp ? 'Ключ на месте и совпадает с приложением' : 'Ключ не совпадает с приложением';
+  $('keyBanner').innerHTML = data.hasPrivateKey && data.matchesApp ? '' : !data.hasPrivateKey ?
+    '<div class="banner"><b>Приватный ключ не найден.</b> Без него выпускать ключи нельзя. Создайте пару — публичный ключ нужно будет вставить в <code>license.js</code> и пересобрать приложение.<div class="actions"><button class="ghost" id="initKey">Создать пару ключей</button></div><div id="initOut" class="key" style="margin-top:12px;display:none"></div></div>' :
+    '<div class="banner err"><b>Приватный ключ не соответствует публичному ключу в приложении.</b> Такие ключи клиент не активирует, поэтому выпуск заблокирован. В приложении сейчас ключ с отпечатком <code>' + data.publicKeyFingerprint + '</code>, а у вашего приватного — <code>' + (data.derivedFingerprint || '—') + '</code>. Вставьте актуальный приватный ключ в <code>tools/license-private.pem</code> или обновите публичный ключ в <code>license.js</code> и пересоберите приложение.<div class="key" style="margin-top:12px">' + (data.derivedPublicKey || '') + '</div></div>';
+  if (!data.hasPrivateKey) {
+    $('initKey').addEventListener('click', async () => {
+      if (!confirm('Создать новую пару? Существующие ключи останутся валидными только если публичный ключ в license.js совпадает с новым приватным.')) return;
+      try {
+        const out = await api('/api/init-keypair', 'POST', {});
+        $('initOut').style.display = 'block';
+        $('initOut').textContent = out.publicKey + '\n\n' + out.note;
+        toast('Пара создана');
+        refresh();
+      } catch (error) { alert(error.message); }
+    });
+  }
+  $('presets').innerHTML = data.presets.map(days => '<button type="button" data-days="' + days + '">' + days + ' дн.</button>').join('');
+  $('presets').querySelectorAll('button').forEach(button => button.addEventListener('click', () => {
+    $('days').value = button.dataset.days;
+    $('presets').querySelectorAll('button').forEach(other => other.classList.toggle('on', other === button));
+  }));
+  const rows = (data.issued || []).map(record =>
+    '<tr><td>' + new Date(record.at).toLocaleDateString('ru-RU') + '</td>' +
+    '<td class="mono">' + record.machinePretty + '</td><td>' + record.edition + '</td><td>' + record.days + '</td>' +
+    '<td>' + (record.note || '—') + '</td>' +
+    '<td><button class="ghost" style="min-height:30px;padding:0 10px" data-key="' + record.key + '">Копировать</button></td></tr>').join('');
+  $('recent').innerHTML = rows || '<tr><td colspan="6" class="empty">Пока ничего не выдано.</td></tr>';
+  $('recent').querySelectorAll('button[data-key]').forEach(button => button.addEventListener('click', () => {
+    navigator.clipboard.writeText(button.dataset.key).then(() => toast('Ключ скопирован'), () => toast('Не удалось скопировать'));
+  }));
+  validateMachine();
+}
+async function issue() {
+  if (!validateMachine()) return;
+  const button = $('issue');
+  button.disabled = true;
+  $('issueHint').className = 'hint';
+  $('issueHint').textContent = 'Подписываем ключ…';
+  try {
+    const data = await api('/api/issue', 'POST', {
+      machineId: compactMachine(),
+      days: Number($('days').value),
+      edition: $('edition').value,
+      note: $('note').value
+    });
+    lastRecord = data.record;
+    $('result').textContent = data.record.key;
+    const expires = new Date(data.record.expiresAt);
+    $('resultMeta').innerHTML =
+      '<div><span>ID компьютера</span><b>' + data.record.machinePretty + '</b></div>' +
+      '<div><span>Тип</span><b>' + data.record.edition + '</b></div>' +
+      '<div><span>Срок</span><b>' + data.record.days + ' дн.</b></div>' +
+      '<div><span>Действует до</span><b>' + expires.toLocaleDateString('ru-RU') + '</b></div>' +
+      '<div><span>ID ключа</span><b>' + data.record.keyId + '</b></div>' +
+      '<div><span>Подпись</span><b>проверена</b></div>';
+    $('issueHint').className = 'hint ok';
+    $('issueHint').textContent = 'Ключ готов и проверен. Отправьте его клиенту.';
+    toast('Ключ сгенерирован');
+    refresh();
+  } catch (error) {
+    $('issueHint').className = 'hint err';
+    $('issueHint').textContent = error.message;
+  } finally {
+    button.disabled = false;
+  }
+}
+$('machine').addEventListener('input', event => {
+  const caretAtEnd = event.target.selectionStart === event.target.value.length;
+  event.target.value = formatMachine(event.target.value);
+  if (caretAtEnd) event.target.setSelectionRange(event.target.value.length, event.target.value.length);
+  validateMachine();
+});
+$('machine').addEventListener('blur', () => { $('machine').value = formatMachine($('machine').value); validateMachine(); });
+$('issue').addEventListener('click', issue);
+$('days').addEventListener('input', () => {
+  $('presets').querySelectorAll('button').forEach(button => button.classList.toggle('on', Number(button.dataset.days) === Number($('days').value)));
+});
+$('copyKey').addEventListener('click', () => {
+  if (!lastRecord) return toast('Сначала сгенерируйте ключ');
+  navigator.clipboard.writeText(lastRecord.key).then(() => toast('Ключ скопирован'), () => toast('Не удалось скопировать'));
+});
+$('copyMessage').addEventListener('click', () => {
+  if (!lastRecord) return toast('Сначала сгенерируйте ключ');
+  const text = [
+    'GOLD-3Po Market Lab — лицензия',
+    '',
+    '1. Запустите приложение на этом компьютере.',
+    '2. Скопируйте ID компьютера с экрана активации (кнопка «Копировать»).',
+    '3. Вставьте ключ ниже и нажмите «Активировать лицензию».',
+    '',
+    'Ключ: ' + lastRecord.key,
+    'Тип: ' + lastRecord.edition,
+    'Срок: ' + lastRecord.days + ' дн.',
+    'Действует до: ' + new Date(lastRecord.expiresAt).toLocaleDateString('ru-RU'),
+    'ID компьютера: ' + lastRecord.machinePretty,
+    '',
+    'Ключ привязан к одному компьютеру и не требует интернета.'
+  ].join('\n');
+  navigator.clipboard.writeText(text).then(() => toast('Текст для клиента скопирован'), () => toast('Не удалось скопировать'));
+});
+$('inspect').addEventListener('click', async () => {
+  const key = $('inspectKey').value.trim();
+  if (!key) { $('inspectOut').textContent = 'Вставьте ключ для проверки.'; return; }
+  try {
+    const data = await api('/api/inspect', 'POST', { key });
+    $('inspectOut').textContent = JSON.stringify(data.payload, null, 2) + '\n\nПодпись: ' + (data.valid ? 'верна' : 'неверна (' + data.reason + ')');
+  } catch (error) {
+    $('inspectOut').textContent = error.message;
+  }
+});
+$('exportCsv').addEventListener('click', async () => {
+  try {
+    const response = await fetch('/api/export.csv', { headers: { 'x-license-token': TOKEN } });
+    const blob = await response.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'gold3po-licences.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast('Журнал выгружен');
+  } catch { toast('Не удалось выгрузить журнал'); }
+});
+validateMachine();
+refresh().catch(error => { $('keyStatus').querySelector('span').textContent = error.message; });
+</script>
+</body>
+</html>
