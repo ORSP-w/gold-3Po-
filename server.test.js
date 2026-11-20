@@ -5,6 +5,7 @@ import { createMarketServer } from './server.js';
 import { createLicenseManager, issueLicenseKey } from './license.js';
 import { createSetupStore } from './setup-store.js';
 import { createSettingsStore } from './settings-store.js';
+import { createPatternStore } from './pattern-store.js';
 
 function testLicense(now = () => Date.now()) {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519');
@@ -14,7 +15,7 @@ function testLicense(now = () => Date.now()) {
 }
 
 let server; let base;
-test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }) }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
+test.beforeEach(async () => { const app = createMarketServer({ token: 'test-secret', staleAfterMs: 10000, storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }), patternStore: createPatternStore({ file: null }) }); server = app.server; await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); base = 'http://127.0.0.1:' + server.address().port; });
 test.afterEach(async () => { await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
 const auth = { authorization: 'Bearer test-secret', 'content-type': 'application/json' };
 const mt5 = (sequence=1) => ({ source:'mt5',symbol:'XAUUSD',timestamp:'2026-11-17T15:00:00.000Z',sequence,bid:2648.2,ask:2648.4,last:2648.3,tickVolume:1,realVolume:0 });
@@ -192,4 +193,118 @@ test('chart zones follow the settings and carry the MT5 drawing style',async()=>
   assert.equal(b.intervalMs,1800000,'timeframe setting drives the zone timeframe');
   assert.ok(b.zones.length>=2&&b.zones.length<=3);
   assert.equal(b.style.fill,true);
+});
+
+// Pattern memory + footprint settings propagation. The stack fixture pins one closed bar with
+// three consecutive ask-heavy rows over light bids — a genuine 3-level buy stack the engine's
+// defaults keep and a strict imbalanceLevels setting removes. Timestamps are anchored to the wall
+// clock so the licence clock watermark (fed from event times) stays inside the test licence window.
+const stackFixture = () => {
+  const ticks = [];
+  let seq = 1;
+  const barTime = Date.now() - 30 * 900000; // a closed bar, not the forming one
+  // quiet prior market around 2650: its 20-bar low (~2649.4) is the liquidity the sweep takes
+  for (let i = 0; i < 40; i++) {
+    const t = new Date(barTime - (40 - i) * 900000);
+    const p = 2650 + Math.sin(i / 5) * 0.5;
+    ticks.push({ timestamp: t.toISOString(), sequence: seq++, bid: +(p - 0.1).toFixed(2), ask: +(p + 0.1).toFixed(2), last: +p.toFixed(2), tickVolume: 2, realVolume: 2, flags: 0 });
+  }
+  // the sweep bar itself: dips below the prior low (2649.3), takes sell-side liquidity, and
+  // prints three consecutive ask-heavy rows (2650.5/.4/.3 at 30 each) over light bids below
+  // them — a genuine buy stack in the same bar as the sweep, which is what the strategy's
+  // requireStacked condition reads (bar.stackedImbalances of the signal bar).
+  const sweepTime = new Date(barTime + 60000);
+  ticks.push({ timestamp: sweepTime.toISOString(), sequence: seq++, bid: 2649.2, ask: 2649.4, last: 2649.3, tickVolume: 20, realVolume: 20, flags: 64 });
+  for (const price of [2650.5, 2650.4, 2650.3]) ticks.push({ timestamp: new Date(sweepTime.getTime() + 20000).toISOString(), sequence: seq++, bid: price - 0.1, ask: price + 0.1, last: price, tickVolume: 30, realVolume: 30, flags: 32 });
+  for (const price of [2650.4, 2650.3, 2650.2]) ticks.push({ timestamp: new Date(sweepTime.getTime() + 40000).toISOString(), sequence: seq++, bid: price - 0.1, ask: price + 0.1, last: price, tickVolume: 5, realVolume: 5, flags: 64 });
+  // close the sweep bar back above the taken low: the reclaim
+  ticks.push({ timestamp: new Date(sweepTime.getTime() + 600000).toISOString(), sequence: seq++, bid: 2649.9, ask: 2650.1, last: 2650.0, tickVolume: 8, realVolume: 8, flags: 32 });
+  // a final quiet bar so the sweep bar is closed
+  ticks.push({ timestamp: new Date(barTime + 1800000).toISOString(), sequence: seq++, bid: 2650.3, ask: 2650.5, last: 2650.4, tickVolume: 4, realVolume: 4, flags: 0 });
+  return ticks;
+};
+const sweepFixture = () => {
+  // A dense walk with a genuine liquidity sweep and reclaim, so the strategy closes trades the
+  // pattern memory can record. Anchored to the wall clock for the licence watermark.
+  const start = Date.now() - 2400 * 900000; let price = 2650;
+  const ticks = [];
+  for (let i = 0; i < 2400; i++) {
+    price += Math.sin(i / 40) * 0.5 + Math.sin(i / 130) * 0.8 + (((i * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5) * 0.9;
+    const at = new Date(start + i * 900000);
+    ticks.push({ timestamp: at.toISOString(), sequence: i + 1, bid: +price.toFixed(2), ask: +(price + 0.2).toFixed(2), last: +(price + 0.1).toFixed(2), tickVolume: 3 + (i % 5), realVolume: 0, flags: (i % 3) * 32 });
+  }
+  return ticks;
+};
+
+async function ingestHistory(ticks) {
+  for (let i = 0; i < ticks.length; i += 1000) {
+    const batch = ticks.slice(i, i + 1000);
+    const r = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: batch }) });
+    assert.equal(r.status, 202, 'history batch must be accepted');
+  }
+}
+
+test('analysis routes honour the stored footprint options, not engine defaults', async () => {
+  await ingestHistory(stackFixture());
+  // The default settings keep the 3-level buy stack; a strict imbalanceLevels setting must remove
+  // it from every analysis route, because the strategy reads these marks (strategy-engine.js reads
+  // bar.stackedImbalances).
+  const before = await (await fetch(base + '/v1/market/replay?symbol=XAUUSD&intervalMs=900000')).json();
+  const stacksBefore = before.bars.reduce((n, b) => n + (b.stackedImbalances || []).length, 0);
+  assert.ok(stacksBefore >= 1, 'the fixture must produce at least one stack under defaults');
+  await fetch(base + '/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ footprint: { imbalanceLevels: 10 } }) });
+  for (const path of ['/v1/market/replay?symbol=XAUUSD&intervalMs=900000', '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000', '/v1/market/backtest?symbol=XAUUSD&intervalMs=900000', '/v1/market/signals?symbol=XAUUSD&intervalMs=900000']) {
+    const data = await (await fetch(base + path)).json();
+    const stacks = (data.bars || data.signals || []).reduce ? (data.bars || []).reduce((n, b) => n + (b.stackedImbalances || []).length, 0) : 0;
+    if (data.bars) assert.equal(stacks, 0, path + ' must drop the stack under the strict setting');
+  }
+  const after = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(after.bars.reduce((n, b) => n + (b.stackedImbalances || []).length, 0), 0, 'the analysis route must agree: no stacks under the strict setting');
+  await fetch(base + '/v1/settings/reset', { method: 'POST' });
+});
+
+test('imbalanceLevels setting changes what the strategy sees in the signals route', async () => {
+  await ingestHistory(stackFixture());
+  // With requireStacked on, the default settings let the signal fire (the fixture's stack exists);
+  // the strict setting removes the stack, so the signal cannot fire.
+  await fetch(base + '/v1/setups', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Stacked strict', definition: { strategy: { requireStacked: true, minScore: 0.4 } } }) });
+  const list = await (await fetch(base + '/v1/setups')).json();
+  await fetch(base + '/v1/setups/apply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: list.setups.at(-1).id, version: 1 }) });
+  const withDefault = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+  await fetch(base + '/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ footprint: { imbalanceLevels: 10 } }) });
+  const withStrict = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+  const count = data => data.signals.filter(s => (s.evidence || []).some(e => /дисбаланс/.test(e))).length;
+  assert.ok(count(withDefault) > 0, 'the default settings keep the stacked signal, got ' + count(withDefault));
+  assert.equal(count(withStrict), 0, 'the strict imbalanceLevels setting must remove the stacked signal');
+  await fetch(base + '/v1/settings/reset', { method: 'POST' });
+});
+
+test('pattern memory records closed setups once and searches them honestly', async () => {
+  await ingestHistory(sweepFixture());
+  const first = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.ok(first.patternMemory.memory >= 0, 'the signals route reports the memory state');
+  assert.ok(first.patternMemory.recorded >= 0);
+  // Re-running the same signals must not double the memory: dedup by fingerprint + entry.
+  const second = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(second.patternMemory.memory, first.patternMemory.memory + second.patternMemory.recorded, 're-running records only new closed setups');
+  // The analogues endpoint answers with the honest empty-or-thin state, never an invented win rate.
+  const analogues = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(analogues.calibrated, false, 'win rate appears only at the 30-sample minimum');
+  assert.equal(analogues.winRate, null);
+  assert.ok(Array.isArray(analogues.analogues));
+  assert.equal(analogues.count, analogues.analogues.length);
+  assert.ok(analogues.memory >= 0);
+  // A non-gold symbol is rejected at the boundary, and a bad threshold is a validation error.
+  assert.equal((await fetch(base + '/v1/patterns/analogues?symbol=EURUSD')).status, 400);
+  assert.equal((await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&threshold=2')).status, 422);
+});
+
+test('pattern analogues endpoint is licence-gated like every research route', async () => {
+  const manager = createLicenseManager({ publicKeyPem: 'unused', machineId: 'AAAA-BBBB-CCCC-DDDD', licenseFile: null, stateFile: null, now: () => Date.now() });
+  const app = createMarketServer({ token: 'test-secret', storageFile: null, license: manager, setupStore: createSetupStore({ file: null }), patternStore: createPatternStore({ file: null }) });
+  await new Promise(resolve => app.server.listen(0, '127.0.0.1', resolve));
+  const url = 'http://127.0.0.1:' + app.server.address().port;
+  try {
+    assert.equal((await fetch(url + '/v1/patterns/analogues')).status, 402);
+  } finally { await new Promise(resolve => app.server.close(resolve)); }
 });

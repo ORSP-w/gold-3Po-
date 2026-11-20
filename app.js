@@ -1,11 +1,14 @@
 import { barDelta, totalVolume } from './market-data.js';
-import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume } from './footprint-engine.js';
+import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
 import { chartScale } from './chart-scale.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
 let bars=[], zones=[], selected=-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
 let levels=[], analysisMeta=null, hasAutoScrolled=false;
+// The user's footprint options (published by settings-client at module init and on every save).
+// The live path recomputes the forming bar with them, so a changed setting shows at once.
+const footprintOptions=()=>window.gold3poSettings?.footprint&&Object.keys(window.gold3poSettings.footprint).length?window.gold3poSettings.footprint:DEFAULT_FOOTPRINT_OPTIONS;
 const fmt=(v,d=2)=>Number(v).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
 const timeLabel=(value,options={},method='toLocaleString')=>{const date=new Date(value);return Number.isNaN(date.getTime())?String(value):date[method]('en-GB',options);};
 const zonesWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+' зона';if(ones>=2&&ones<=4&&(tens<12||tens>14))return n+' зоны';return n+' зон';};
@@ -60,7 +63,7 @@ function levelOf(b,price){
 function barFootprint(b){
  if(b.poc!==undefined&&b.valueArea!==undefined&&Array.isArray(b.levels))return b;
  if(!Array.isArray(b?.levels))return b;
- return {...b,...footprintOf(b.levels,{h:b.h,l:b.l,c:b.c,priceStep:0.1})};
+ return {...b,...footprintOf(b.levels,{...footprintOptions(),h:b.h,l:b.l,c:b.c,priceStep:0.1})};
 }
 function renderFootprint(){
  if(!bars.length){grid.innerHTML='<div class="detail-caption">Тики брокера ещё не поступили. Подключите MT5, чтобы построить футпринт.</div>';return;}
@@ -81,7 +84,7 @@ function renderFootprint(){
  const feet=visible.map(barFootprint);
  // One scale for the whole panel: a colour means the same thing in every column.
  const scale=Math.max(1,...feet.map(b=>Number(b.maxLevelVolume)||0));
- const profile=sessionProfile(bars,{priceStep:0.1});
+ const profile=sessionProfile(bars,{priceStep:0.1,options:footprintOptions()});
  const currentProfile=profile.current;
  const profileRows=new Map((currentProfile?.levels||[]).map(row=>[row.price.toFixed(2),row]));
  const profileMax=Math.max(1,...(currentProfile?.levels||[]).map(row=>row.total));
@@ -198,7 +201,7 @@ function applyLiveTick(event){
  const bar=bars.at(-1);
  const state={levels:bar.levelMap,o:bar.o,h:bar.h,l:bar.l,c:bar.c,volume:bar.volume||0,bid:bar.bid||0,ask:bar.ask||0,unknown:bar.unknown||0,tickCount:bar.tickCount||0};
  applyTickToBar(state,{last:Number(event.last),volume:footprintTickVolume(event),aggressorSide:event.aggressorSide,flags:event.flags},0.1);
- const foot=footprintOf(state.levels,{h:state.h,l:state.l,c:state.c});
+ const foot=footprintOf(state.levels,{...footprintOptions(),h:state.h,l:state.l,c:state.c});
  bar.levelMap=state.levels;
  Object.assign(bar,{o:state.o,h:state.h,l:state.l,c:state.c,volume:state.volume,bid:state.bid,ask:state.ask,unknown:state.unknown,tickCount:state.tickCount,
   levels:foot.levels,delta:foot.delta,deltaRatio:foot.deltaRatio,poc:foot.poc,valueArea:foot.valueArea,imbalances:foot.imbalances,
@@ -207,6 +210,9 @@ function applyLiveTick(event){
  scheduleLiveRender();
 }
 window.addEventListener('market-tick',e=>applyLiveTick(e.detail));
+// Footprint settings changed: re-render with the new options. Bars served before the change carry
+// the old marks, so drop their cached footprint fields and recompute them from the level maps.
+window.addEventListener('gold3po-settings',()=>{for(const b of bars){if(Array.isArray(b.levels)&&b.poc!==undefined){delete b.poc;delete b.valueArea;delete b.imbalances;delete b.stackedImbalances;delete b.absorbedLevels;delete b.unfinishedHigh;delete b.unfinishedLow;delete b.delta;delete b.deltaRatio;delete b.maxLevelVolume;}}renderFootprint();renderInspector();});
 window.addEventListener('market-analysis',e=>{if(replayMode)return;const a=e.detail;if(!a?.bars?.length)return;const previousTime=bars[selected]?.time,wasAtLatest=selected===bars.length-1;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=wasAtLatest||selected<0?bars.length-1:Math.max(0,bars.findIndex(b=>b.time===previousTime));levels=currentLevels();const feedLive=a.feed?.status==='online';const status=$('#chartStatus');if(status){status.textContent=(feedLive?'ОНЛАЙН · ':'ИСТОРИЯ · ')+barsWord(bars.length);status.className=feedLive?'ok':'warning';}const signalSummary=$('#signalSummary');if(signalSummary){const sweeps=bars.reduce((n,b)=>n+(b.sweeps?.length||0),0),stacked=bars.reduce((n,b)=>n+(b.stackedImbalances?.length||0),0),absorption=bars.filter(b=>b.absorption).length,exhaustion=bars.filter(b=>b.exhaustion).length,unfinished=bars.filter(b=>b.unfinishedHigh||b.unfinishedLow).length,absorbed=bars.reduce((n,b)=>n+((b.absorbedLevels||[]).length?1:0),0);const naked=a.profile?.naked?.length||0,div=a.divergence?.side;signalSummary.textContent='СНЯТИЯ '+sweeps+' · СТЕКИ '+stacked+' · ПОГЛОЩЕНИЕ УРОВНЕЙ '+absorbed+' · НЕЗАКРЫТЫЕ АУКЦИОНЫ '+unfinished+(naked?' · ГОЛЫХ POC '+naked:'')+(div?(div==='bearish'?' · ДИВЕРГЕНЦИЯ: МЕДВЕЖЬЯ':' · ДИВЕРГЕНЦИЯ: БЫЧЬЯ'):'');}const tag=$('#dataMode');if(tag)tag.textContent=feedLive?'ROBOFOREX MT5 · ОНЛАЙН':'ROBOFOREX MT5 · ИСТОРИЯ';const range=$('#barCount');if(range)range.textContent=barsWord(bars.length);const windowNode=$('#sessionWindow');if(windowNode){const hh=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?'':String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');};windowNode.textContent=hh(bars[0].time)+' — '+hh(bars.at(-1).time);}renderZones();select(selected);});
 window.addEventListener('market-replay',e=>{
  const a=e.detail;if(!a?.bars?.length)return;

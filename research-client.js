@@ -7,6 +7,44 @@ let replayTimer = null;
 let latestSignalId = '';
 let notificationsEnabled = false;
 let signalTimer = null;
+// Pattern memory: the search runs on demand, and the threshold slider retunes what counts as similar.
+let patternTimer = null;
+
+const patternThreshold = () => Math.max(0.5, Math.min(1, (Number($('patternThreshold')?.value) || 80) / 100));
+const patternThresholdLabel = () => { const v = $('patternThresholdValue'); if (v) v.textContent = Math.round(patternThreshold() * 100) + '%'; };
+
+async function refreshPatterns() {
+  const result = $('patternResult'), meta = $('patternMeta'), list = $('patternAnalogues');
+  if (!result) return;
+  try {
+    const response = await fetch('/v1/patterns/analogues?symbol=' + encodeURIComponent(marketSymbol()) + '&intervalMs=' + tfMs() + '&threshold=' + patternThreshold(), { cache: 'no-store' });
+    const data = await response.json();
+    if (!response.ok) throw new Error(apiError(data, 'Поиск аналогов не выполнен'));
+    if (!data.reference) {
+      result.textContent = 'В текущей истории нет подходящего снятия ликвидности, с чем можно сравнивать.';
+      meta.textContent = data.message || 'Аналоги — исторические наблюдения похожих сетапов, а не прогноз.';
+      list.innerHTML = '';
+      return;
+    }
+    if (!data.count) {
+      result.textContent = `Память: ${data.memory} наблюдений. Ни одно не похоже на текущий сетап при пороге ${Math.round(patternThreshold() * 100)}% — ослабьте порог, чтобы увидеть дальше.`;
+      meta.textContent = 'Аналоги — исторические наблюдения похожих сетапов, а не прогноз.';
+      list.innerHTML = '';
+      return;
+    }
+    const winRate = data.calibrated ? `винрейт ${(data.winRate * 100).toFixed(1)}%` : 'винрейт не показывается: меньше 30 случаев';
+    result.textContent = `Похожих случаев: ${data.count} · ${winRate} · матожидание ${data.expectancyR === null ? '—' : (data.expectancyR > 0 ? '+' : '') + data.expectancyR.toFixed(2) + 'R'} · из них вне выборки ${data.outOfSample}`;
+    meta.textContent = data.caveat || 'Аналоги — исторические наблюдения похожих сетапов, а не прогноз.';
+    const rows = (data.analogues || []).slice(0, 5).map(a => {
+      const outcome = a.netR > 0 ? `+${a.netR.toFixed(2)}R` : `${a.netR.toFixed(2)}R`;
+      return `<div class="pattern-row"><span>${new Date(a.signalTime).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span><b>${Math.round(a.score * 100)}%</b><span class="${a.netR > 0 ? 'win' : 'loss'}">${outcome} · ${exitText(a.exitReason)}</span></div>`;
+    });
+    list.innerHTML = rows.join('');
+    result.classList.toggle('thin', !data.calibrated);
+  } catch (error) {
+    result.textContent = 'Поиск аналогов не выполнен: ' + error.message;
+  }
+}
 
 const number = (id, fallback) => {
   const value = Number($(id)?.value);
@@ -163,6 +201,8 @@ async function refreshSignals() {
   } catch {}
 }
 $('loadReplay')?.addEventListener('click',loadReplay);
+$('findAnalogues')?.addEventListener('click',()=>{refreshPatterns();});
+$('patternThreshold')?.addEventListener('input',()=>{patternThresholdLabel();if(patternTimer!==null)window.clearTimeout(patternTimer);patternTimer=window.setTimeout(()=>{patternTimer=null;refreshPatterns();},400);});
 $('playReplay')?.addEventListener('click',playReplay);
 $('pauseReplay')?.addEventListener('click',stopReplay);
 $('liveView')?.addEventListener('click',exitReplay);
@@ -183,7 +223,10 @@ const autoReplayTo = $('replayTo')?.value || '';
 window.addEventListener('market-analysis',()=>{
   if (signalTimer !== null) window.clearTimeout(signalTimer);
   signalTimer = window.setTimeout(()=>{signalTimer=null;refreshSignals();},1800);
+  if (patternTimer !== null) window.clearTimeout(patternTimer);
+  patternTimer = window.setTimeout(()=>{patternTimer=null;refreshPatterns();},2400);
 });
 window.addEventListener('setups-changed',()=>{refreshSignals();});
-window.addEventListener('mt5-symbol-change',()=>{if(replayBars.length)void exitReplay();refreshSignals();});
+window.addEventListener('mt5-symbol-change',()=>{if(replayBars.length)void exitReplay();refreshSignals();refreshPatterns();});
 refreshSignals();
+refreshPatterns();

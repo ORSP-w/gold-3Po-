@@ -69,9 +69,12 @@ function render() {
   $('reactionBarsValue') && ($('reactionBarsValue').textContent = `${z.reactionBars} бар${z.reactionBars === 1 ? '' : z.reactionBars < 5 ? 'а' : 'ов'}`);
   const f = settings.footprint;
   set('setImbalanceRatio', f.imbalanceRatio); set('setValueAreaShare', Math.round(f.valueAreaShare * 100)); set('setAbsorptionMultiple', f.absorptionMultiple);
+  set('setImbalanceLevels', f.imbalanceLevels); set('setMinLevelVolume', f.minLevelVolume);
   $('imbalanceRatioValue') && ($('imbalanceRatioValue').textContent = `${Math.round(f.imbalanceRatio * 100)}%`);
   $('valueAreaShareValue') && ($('valueAreaShareValue').textContent = `${Math.round(f.valueAreaShare * 100)}%`);
   $('absorptionMultipleValue') && ($('absorptionMultipleValue').textContent = `${Number(f.absorptionMultiple).toFixed(1)}× медианы`);
+  $('imbalanceLevelsValue') && ($('imbalanceLevelsValue').textContent = `${f.imbalanceLevels} подряд`);
+  $('minLevelVolumeValue') && ($('minLevelVolumeValue').textContent = `${f.minLevelVolume} ед. объёма`);
   setSeg('setTimeframe', z.timeframeMinutes);
   set('setBuyColor', m.buyColor.toLowerCase()); set('setSellColor', m.sellColor.toLowerCase());
   setSeg('setLineStyle', m.lineStyle);
@@ -142,7 +145,7 @@ function bind() {
   });
   const ranges = { setMinZones: 'minZones', setMaxZones: 'maxZones', setPivotWidth: 'pivotWidth', setClusterAtr: 'clusterAtr', setZoneWidthAtr: 'zoneWidthAtr', setMaxDistanceAtr: 'maxDistanceAtr', setAtrPeriod: 'atrPeriod', setReactionBars: 'reactionBars' };
   for (const [id, key] of Object.entries(ranges)) $(id)?.addEventListener('input', e => change('zones', key, Number(e.target.value)));
-  const footprintRanges = { setImbalanceRatio: ['imbalanceRatio', Number], setAbsorptionMultiple: ['absorptionMultiple', Number], setValueAreaShare: ['valueAreaShare', v => Number(v) / 100] };
+  const footprintRanges = { setImbalanceRatio: ['imbalanceRatio', Number], setAbsorptionMultiple: ['absorptionMultiple', Number], setValueAreaShare: ['valueAreaShare', v => Number(v) / 100], setImbalanceLevels: ['imbalanceLevels', Number], setMinLevelVolume: ['minLevelVolume', Number] };
   for (const [id, [key, cast]] of Object.entries(footprintRanges)) $(id)?.addEventListener('input', e => change('footprint', key, cast(e.target.value)));
   $('setLineWidth')?.addEventListener('input', e => change('mt5', 'lineWidth', Number(e.target.value)));
   $('setBuyColor')?.addEventListener('input', e => change('mt5', 'buyColor', e.target.value.toUpperCase()));
