@@ -118,7 +118,8 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
         owner.lastTick = result.ticks.at(-1).timestamp;
       }
       await refreshLevels(owner, owner.dirty);
-      set(owner, { state: 'online', lastTick: owner.lastTick ?? null, message: !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни рассчитываются на M15.' });
+      const online = !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
+      set(owner, { state: 'online', lastTick: owner.lastTick ?? null, message: owner.historyNote ? `${online} ${owner.historyNote}` : online });
     } catch (error) {
       if (session === owner) await disconnect(error.message);
     } finally {
@@ -131,6 +132,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const history = await owner.worker.request('history', {}, 60_000);
       if (session !== owner) return;
       await ingest(owner, history.ticks, true);
+      if (history.truncated) owner.historyNote = 'История MT5 неполная: терминал отдал не весь поток тиков за 8 часов.';
     } catch (error) { set(owner, { message: `История MT5 недоступна: ${error.message}` }); }
     if (session === owner) void poll(owner);
   }

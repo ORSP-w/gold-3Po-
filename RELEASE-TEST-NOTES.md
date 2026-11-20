@@ -57,7 +57,7 @@ These are readings of executed volume from your broker, not a forecast, not a DO
 1. Start **GOLD-3Po Market Lab** and keep it running.
 2. In MT5, open **Tools → Options → Expert Advisors** and allow WebRequest to `http://127.0.0.1:8787`.
 3. Open the installed EA source at `resources\adapters\mt5\Gold3PoBridge.mq5` in the GOLD-3Po installation directory using MetaEditor. Press F7 to compile.
-4. Open `%APPDATA%\GOLD-3Po Market Lab\settings.json` in Notepad and copy the value of `marketIngestToken`.
+4. In GOLD-3Po open **⚙ Настройки → Отрисовка в MT5 → Мост MT5** and press «Скопировать»; the app shows the API address and the ingest token (the same value is `marketIngestToken` in `%APPDATA%\GOLD-3Po Market Lab\settings.json`).
 5. Attach the EA to the RoboForex XAUUSD chart. In EA Inputs, paste the copied value into `IngestToken`.
 6. Confirm `http://127.0.0.1:8787/health` reports the MT5 feed and the chart leaves the empty state («График пуст») and shows broker history / live data.
 
@@ -76,6 +76,8 @@ The EA is data-only. It cannot place or manage orders. Keep it on a demo account
 - Non-gold symbols (e.g. EURUSD) are rejected by the API; only XAUUSD/GC data is accepted.
 - Custom conditions: save a named setup, apply it, confirm signals/backtest/risk defaults follow it; export and re-import the JSON (import creates a new identity, unknown fields are rejected).
 - MT5 zone drawing: with the EA attached, liquidity-zone rectangles and labels appear on the XAUUSD chart and refresh every few seconds as new ticks arrive; removing the EA removes all G3P_ objects.
+- Bar inspector adds up: «Объём на бид» + «Объём на аск» + «Без стороны» equals «Общий объём», and ticks the broker did not classify are shown in «Без стороны» instead of being guessed.
+- A multi-day chart labels the time axis with dates, not a repeating «10:00», and the settings tabs stay on one row on a phone.
 
 An empty replay or zero backtest trades can be a valid result when there is not enough available broker history or no qualifying liquidity-sweep setup.
 

@@ -4,7 +4,7 @@ GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUU
 
 ## Implemented parts
 
-1. **Liquidity & Footprint workspace:** interactive OHLC chart, 3–7 ATR-based reaction zones (swing clusters with role flips, ranked by touches, reaction, recency, volume and distance), Bid × Ask / Delta / Volume footprint modes with per-bar POC and 70% value area, diagonal 300% imbalances, stacked imbalances, absorption, unfinished auctions, the session volume profile (VAH/VAL/POC, naked POC) and a live forming bar, bar inspector, selection and reset.
+1. **Liquidity & Footprint workspace:** interactive OHLC chart, 3–7 ATR-based liquidity zones collected from several independent sources (swing clusters with role flips, the previous day and week, session extremes, H1/H4 swings, the volume profile and round numbers), ranked by measured reactions, touches, recency, volume, source confluence and distance, Bid × Ask / Delta / Volume footprint modes with per-bar POC and 70% value area, diagonal 300% imbalances, stacked imbalances, absorption, unfinished auctions, the session volume profile (VAH/VAL/POC, naked POC) and a live forming bar, bar inspector, selection and reset.
 2. **Market data transport:** authenticated MT5 tick and history ingestion, sequenced live batches, COMEX normalized trade contract, SSE, health checks and append-only JSONL persistence.
 3. **Market engine:** OHLC aggregation, price-level activity, Delta, Cumulative Delta, adjacent and stacked imbalance candidates, repeated liquidity pools, sweeps/reclaims, and conservative unknown-side handling.
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.
@@ -29,7 +29,7 @@ On first launch, the application creates a local ingestion token and settings fi
 
 On first launch an activation screen shows this computer's **Machine ID**. Send it to the vendor, receive a signed `GOLD1.…` key and paste it to activate. Keys are bound to one computer and valid 1–9999 days; everything is verified offline. See `LICENSE-KEYS.md`.
 
-The packaged MT5 Expert Advisor source is installed under `resources\adapters\mt5\Gold3PoBridge.mq5` inside the application directory. The token used in MT5 is the `marketIngestToken` value in `settings.json`. Add `http://127.0.0.1:8787` to the MT5 WebRequest allow-list.
+The packaged MT5 Expert Advisor source is installed under `resources\adapters\mt5\Gold3PoBridge.mq5` inside the application directory. The token used in MT5 is shown in the app under **⚙ Настройки → Отрисовка в MT5 → Мост MT5** with a copy button (the same value is `marketIngestToken` in `settings.json`). Add `http://127.0.0.1:8787` to the MT5 WebRequest allow-list.
 
 The installer workflow runs unit tests and JavaScript syntax checks, packages the Windows x64 NSIS installer, installs it on a clean runner, starts the installed application in smoke-test mode, and publishes the installer with a SHA-256 checksum. The installer is not code-signed; Windows may show an unknown-publisher warning.
 

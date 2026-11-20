@@ -7,7 +7,7 @@ const styles = await readFile(new URL('./styles.css', import.meta.url), 'utf8');
 test('all static action buttons are wired or explicitly delegated',()=>{const buttons=[...html.matchAll(/<button\b([^>]*)>/g)].map(m=>m[1]);for(const attrs of buttons){const hasId=/\bid=/.test(attrs),delegated=/\bdata-(mode|go|tab|value|color)=/.test(attrs);assert.ok(hasId||delegated,'Unwired static button: '+attrs);}});
 test('every direct control ID exists in markup and has an action handler',()=>{for(const id of ['resetView','layoutButton','zonesToggle','numbersToggle','footprintModes']){assert.ok(html.includes('id="'+id+'"'),'Missing '+id);assert.ok(app.includes("$('#"+id+"')"),'No handler/query for '+id);}});
 test('inactive placeholder navigation and timeframe controls are absent',()=>{assert.doesNotMatch(html,/rail-button|id="timeframes"|id="notifications"|id="settings"/);assert.doesNotMatch(app,/\$\('#timeframes'\)/);});
-test('chart and footprint targets exist before the module initializes',()=>{for(const id of ['priceChart','footprintGrid','zoneList','selectedBar','selectedDelta','bidVolume','askVolume','totalVolume','imbalance','toast'])assert.ok(html.includes('id="'+id+'"'),'Missing UI target '+id);});
+test('chart and footprint targets exist before the module initializes',()=>{for(const id of ['priceChart','footprintGrid','zoneList','selectedBar','selectedDelta','bidVolume','askVolume','totalVolume','unknownVolume','imbalance','toast'])assert.ok(html.includes('id="'+id+'"'),'Missing UI target '+id);});
 
 test('liquidity zone rows are wired to selection and workspace reset clears selection',()=>{assert.ok(app.includes('selectedZone=selectedZone===n.dataset.zone?null:n.dataset.zone'));assert.ok(app.includes('renderZones();renderChart();'));assert.match(app,/selectedZone=null/);});
 
@@ -63,11 +63,23 @@ test('MT5 connection dialog, tray-safe bridge and indicator installer are wired'
 
 test('settings sheet controls exist and are handled by settings-client',async()=>{
   const client=await readFile(new URL('./settings-client.js', import.meta.url),'utf8');
-  for(const id of ['settingsDialog','openSettings','settingsClose','settingsDone','settingsReset','settingsTabs','settingsStatus','setMinZones','setMaxZones','setTimeframe','setPivotWidth','setClusterAtr','setZoneWidthAtr','setMaxDistanceAtr','setAtrPeriod','setBuyColor','setSellColor','setLineStyle','setLineWidth','setFill','setLabels','setStrength','setTheme','stylePreview','railNav']){
+  for(const id of ['settingsDialog','openSettings','settingsClose','settingsDone','settingsReset','settingsTabs','settingsStatus','setMinZones','setMaxZones','setTimeframe','setPivotWidth','setClusterAtr','setZoneWidthAtr','setMaxDistanceAtr','setAtrPeriod','setBuyColor','setSellColor','setLineStyle','setLineWidth','setFill','setLabels','setStrength','setTheme','stylePreview','railNav','bridgeBlock','bridgeToken','bridgeCopy']){
     assert.ok(html.includes('id="'+id+'"'),'missing #'+id);
     assert.ok(client.includes("'"+id+"'"),'settings-client does not handle #'+id);
   }
   for(const go of [...html.matchAll(/data-go="([^"]+)"/g)].map(m=>m[1]))assert.ok(client.includes("'"+go+"'")||client.includes(go+':'),'rail target not handled: '+go);
   assert.match(client,/closest\('button\[data-tab\]'\)/);assert.match(client,/closest\('button\[data-value\]'\)/);
   assert.ok(html.indexOf('settings-client.js')<html.indexOf('market-client.js'),'settings must load before the market client reads the timeframe');
+});
+
+test('the EA bridge port and token are shown by the app, not only in settings.json',async()=>{
+  const main=await readFile(new URL('./electron/main.js', import.meta.url),'utf8');
+  const preload=await readFile(new URL('./electron/preload.cjs', import.meta.url),'utf8');
+  const client=await readFile(new URL('./settings-client.js', import.meta.url),'utf8');
+  assert.ok(html.includes('id="bridgeBlock"')&&html.includes('id="bridgeToken"')&&html.includes('id="bridgeCopy"'),'the MT5 pane must expose the bridge token');
+  assert.match(html,/id="bridgeBlock"[^>]*hidden/,'the bridge block starts hidden until the desktop API answers');
+  assert.match(preload,/bridge:\s*\(\)\s*=>\s*ipcRenderer\.invoke\('mt5:bridge'\)/,'preload must expose mt5:bridge');
+  assert.match(main,/handle\('bridge',\s*\(\)\s*=>\s*\(\{[^}]*ingestToken:\s*marketIngestToken/,'main must answer with the live port and token');
+  assert.match(client,/window\.goldMt5\?\.bridge/);
+  assert.match(client,/if \(!api\) \{ block\.hidden = true/,'a browser without the desktop bridge must hide the block instead of showing an empty secret');
 });

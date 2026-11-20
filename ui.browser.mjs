@@ -59,6 +59,17 @@ try {
   assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day broker history');
   assert.equal(await page.locator('#chartEmpty').isHidden(), true, 'empty state must disappear once broker data arrives');
   assert.ok(await page.locator('.zone-row').count() > 0, 'liquidity zones should appear once broker history arrives');
+  const zoneTally = await page.evaluate(() => {
+    const num = t => Number((t || '').replace(/[^\d]/g, ''));
+    return {
+      rows: document.querySelectorAll('.zone-row').length,
+      badge: num(document.querySelector('#zoneCount').textContent),
+      above: num(document.querySelector('#aboveZones').textContent),
+      below: num(document.querySelector('#belowZones').textContent)
+    };
+  });
+  assert.equal(zoneTally.badge, zoneTally.rows, 'the zone badge must match the rows listed');
+  assert.equal(zoneTally.above + zoneTally.below, zoneTally.rows, 'above-price plus below-price must account for every listed zone');
   const zoneText = await page.locator('#zoneList').innerText();
   assert.ok(/[А-Яа-яЁё]/.test(zoneText), 'zone rows must be captioned in Russian, not engine tokens');
   assert.ok(!/Swing high|Prior day|Value area|UNTESTED|TESTED|SWEPT/.test(zoneText), 'no English label or state may reach the panel');
@@ -108,6 +119,14 @@ try {
   assert.match(await page.locator('#selectedBar').innerText(), new RegExp('#'+String(firstIndex+1).padStart(3,'0')));
   await page.locator('.candle[data-index="2"]').click();
   assert.match(await page.locator('#selectedBar').innerText(), /#003/);
+  const sideSplit = await page.evaluate(() => ({
+    bid: document.querySelector('#bidVolume').textContent,
+    ask: document.querySelector('#askVolume').textContent,
+    unknown: document.querySelector('#unknownVolume').textContent,
+    total: document.querySelector('#totalVolume').textContent
+  }));
+  assert.equal(Number(sideSplit.bid) + Number(sideSplit.ask) + Number(sideSplit.unknown), Number(sideSplit.total), 'the inspector must account for every tick, including the ones without an aggressor side');
+  assert.notEqual(sideSplit.unknown, '—', 'ticks the broker did not classify must be shown, not silently dropped');
 
   const totalBars = Number((await page.locator('#barCount').innerText()).replace(/[^\d]/g, ''));
   await page.locator('#resetView').click();
@@ -200,6 +219,14 @@ try {
   await page.locator('#openSettings').click();
   await page.waitForSelector('#settingsDialog[open]');
   await page.locator('#settingsTabs button[data-tab="zones"]').click();
+  const tabs = await page.evaluate(() => [...document.querySelectorAll('#settingsTabs button')].map(b => {
+    const r = b.getBoundingClientRect();
+    return { top: Math.round(r.top), width: Math.round(r.width), scroll: b.scrollWidth };
+  }));
+  assert.equal(new Set(tabs.map(t => t.top)).size, 1, 'settings tabs must stay on one row on a phone');
+  assert.ok(tabs.every(t => t.width >= t.scroll - 1), 'no settings tab may clip its own label');
+  const tabStrip = await page.evaluate(() => { const el = document.querySelector('#settingsTabs'); return { scroll: el.scrollWidth, client: el.clientWidth }; });
+  assert.ok(tabStrip.scroll <= tabStrip.client + 1, 'all four settings tabs must be reachable without horizontal scrolling on a phone');
   assert.ok(await page.locator('#settingsTabs button[data-tab="zones"]').evaluate(el => el.classList.contains('on')), 'the active tab must be the zone pane');
   assert.ok(!(await page.locator('#settingsTabs button[data-tab="mt5"]').evaluate(el => el.classList.contains('on'))), 'only one tab is active');
   const sheet = await page.evaluate(() => {
@@ -219,6 +246,22 @@ try {
   assert.equal(sheet.toggles, 5, 'all five level sources are switchable');
   assert.ok(sheet.sliders >= 7, 'every numeric zone option has a slider');
   await page.screenshot({ path:'artifacts/settings-mobile.png' });
+  await page.locator('#settingsTabs button[data-tab="mt5"]').click();
+  await page.waitForTimeout(120);
+  const bridge = await page.evaluate(() => {
+    const block = document.querySelector('#bridgeBlock'), note = document.querySelector('#bridgeUnavailable');
+    return {
+      overflow: document.documentElement.scrollWidth - innerWidth,
+      blockVisible: block ? block.getBoundingClientRect().height > 0 : null,
+      noteVisible: note ? note.getBoundingClientRect().height > 0 : null,
+      token: document.querySelector('#bridgeToken')?.textContent?.trim()
+    };
+  });
+  assert.ok(bridge.overflow <= 0, 'the MT5 pane must not overflow a phone width');
+  assert.equal(bridge.blockVisible, false, 'a browser without the desktop bridge must not show a token block');
+  assert.equal(bridge.noteVisible, true, 'the browser must explain why the bridge block is empty');
+  assert.equal(bridge.token, '—', 'web mode must not fake a bridge token');
+  await page.locator('#settingsTabs button[data-tab="zones"]').click();
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
   // Плотная история: на 4K панель должна вмещать серию, а не растягивать её в ленту.

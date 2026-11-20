@@ -29,8 +29,13 @@ function renderChart(){
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);
  let html=''; for(let p=Math.ceil(min/gridStep)*gridStep;p<=max;p+=gridStep)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,gridStep<1?2:gridStep<10?1:0)}</text>`;
  if(showZones)for(const z of zones){const top=y(z.high),h=Math.max(4,y(z.low)-y(z.high)),c=z.side==='buy'?'zone-buy':'zone-sell';html+=`<rect x="${left}" y="${top}" width="${width}" height="${h}" class="${c} ${selectedZone===z.id?'selected-zone':''}" opacity="${.08+z.strength*.2}"/><line x1="${left}" y1="${top}" x2="${left+width}" y2="${top}" class="${c}-edge"/>`;}
+ const multiDay=(Date.parse(bars.at(-1).time)-Date.parse(bars[0].time))>86400000;
+ const labelStep=Math.max(1,Math.ceil(bars.length/Math.max(2,Math.floor(width/92))));
+ const axisLabel=b=>!multiDay?timeLabel(b.time,{hour:'2-digit',minute:'2-digit',timeZone:'UTC'})
+   :width>=700?timeLabel(b.time,{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',timeZone:'UTC'})
+   :timeLabel(b.time,{day:'2-digit',month:'2-digit',timeZone:'UTC'});
  bars.forEach((b,i)=>{const cx=x(i),up=b.c>=b.o,top=Math.min(y(b.o),y(b.c)),h=Math.max(1.5,Math.abs(y(b.o)-y(b.c)));html+=`<g class="candle ${i===selected?'selected-candle':''}" data-index="${i}" tabindex="0" role="button" aria-label="Выбрать свечу ${i+1}"><line x1="${cx}" y1="${y(b.h)}" x2="${cx}" y2="${y(b.l)}" class="wick ${up?'wick-up':'wick-down'}"/><rect x="${cx-cw/2}" y="${top}" width="${cw}" height="${h}" rx="1" class="${up?'candle-up':'candle-down'}"/><rect x="${cx-step/2}" y="30" width="${step}" height="322" class="hit-area"/></g>`;
- if(i%(Math.ceil(bars.length/8))===0)html+=`<text x="${cx}" y="378" text-anchor="middle" class="time-label">${timeLabel(b.time,{hour:'2-digit',minute:'2-digit',timeZone:'UTC'})}</text>`;});
+ if(i%labelStep===0)html+=`<text x="${cx}" y="378" text-anchor="middle" class="time-label">${axisLabel(b)}</text>`;});
  const last=bars.at(-1),py=y(last.c);html+=`<line x1="${left}" y1="${py}" x2="${left+width}" y2="${py}" class="last-price-line"/><rect x="${left+width-2}" y="${py-11}" width="70" height="22" rx="5" class="last-price-tag"/><text x="${left+width+33}" y="${py+4}" text-anchor="middle" class="last-price-text">${fmt(last.c)}</text>`;
  chart.setAttribute('viewBox',`0 0 ${svgWidth} 390`);chart.style.width=svgWidth+'px';chart.innerHTML=html;
  chart.querySelectorAll('.candle').forEach(n=>{const f=()=>select(Number(n.dataset.index));n.addEventListener('click',f);n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f();}});});if(live&&!hasAutoScrolled){chart.parentElement.scrollLeft=chart.parentElement.scrollWidth;hasAutoScrolled=true;}
@@ -125,7 +130,7 @@ function renderFootprint(){
 for(const type of ['wheel','touchmove','pointerdown'])grid.addEventListener(type,()=>{grid.dataset.autoScroll='0';},{passive:true});
 $('#resetView')?.addEventListener('click',()=>{grid.dataset.autoScroll='1';});
 function renderInspector(){
- const clear=()=>{$('#selectedBar').textContent='—';$('#selectedDelta').textContent='— Δ';$('#selectedDelta').className='delta-chip';for(const id of ['bidVolume','askVolume','totalVolume','imbalance','pocPrice','valueAreaRange','absorbedInfo','unfinishedInfo']){const n=$('#'+id);if(n)n.textContent='—';}const v=$('#flowVerdict');if(v){v.className='flow-verdict';v.textContent='Выберите столбец футпринта: POC, зона стоимости и незакрытый аукцион считаются по тикам брокера.';}};
+ const clear=()=>{$('#selectedBar').textContent='—';$('#selectedDelta').textContent='— Δ';$('#selectedDelta').className='delta-chip';for(const id of ['bidVolume','askVolume','totalVolume','unknownVolume','imbalance','pocPrice','valueAreaRange','absorbedInfo','unfinishedInfo']){const n=$('#'+id);if(n)n.textContent='—';}const v=$('#flowVerdict');if(v){v.className='flow-verdict';v.textContent='Выберите столбец футпринта: POC, зона стоимости и незакрытый аукцион считаются по тикам брокера.';}};
  const raw=bars[selected];if(!raw){clear();return;}
  const b=barFootprint(raw);
  const d=(b.unknown||0)>0?null:(b.delta??barDelta(b)),bid=b.bid||0,ask=b.ask||0;
@@ -135,6 +140,7 @@ function renderInspector(){
  $('#bidVolume').textContent=fmt(bid,0);
  $('#askVolume').textContent=fmt(ask,0);
  $('#totalVolume').textContent=fmt(b.volume??totalVolume(b),0);
+ $('#unknownVolume').textContent=(b.unknown||0)>0?fmt(b.unknown,0):'—';
  $('#imbalance').textContent=bid&&ask?`${(Math.max(bid,ask)/Math.min(bid,ask)).toFixed(2)}×`:'—';
  $('#pocPrice').textContent=b.poc!=null?fmt(b.poc):'—';
  $('#valueAreaRange').textContent=b.valueArea?`${fmt(b.valueArea.low)} — ${fmt(b.valueArea.high)} · ${Math.round(b.valueArea.share*100)}%`:'—';

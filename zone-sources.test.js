@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { collectSourceLevels } from './zone-sources.js';
 import { detectLiquidityZones } from './market-engine.js';
+import { zoneLabelRu } from './zone-labels.js';
 
 // Ten days of 15m candles starting Monday 2026-01-05, gold-like range around $2650.
 function history(days = 10) {
@@ -34,6 +35,17 @@ test('completed days, sessions, weeks and higher timeframes all contribute level
     assert.ok(Number.isFinite(level.price) && level.price > 0, 'every level is a real price');
     assert.ok(level.weight > 0 && level.weight <= 1);
     assert.ok(Number.isInteger(level.index) && level.index >= 0, 'levels point back at the candle that formed them');
+  }
+});
+
+test('every source label has a Russian caption for the panel and the MT5 chart', () => {
+  const levels = collectSourceLevels(history(), { priceStep: 0.1 });
+  const seen = new Set(levels.map(level => level.label));
+  assert.ok(seen.size >= 8, 'the sample must exercise the sources');
+  for (const label of seen) {
+    const ru = zoneLabelRu(label);
+    assert.notEqual(ru, label, 'no Russian caption for source label: ' + label);
+    assert.doesNotMatch(ru, /\s(high|low)$/, 'untranslated source leaked into the panel: ' + label);
   }
 });
 

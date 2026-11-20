@@ -165,6 +165,26 @@ test('session disconnects when the licence becomes invalid', async () => {
   assert.match(state.message, /лиценз/i);
 });
 
+test('a truncated MT5 history is reported instead of passed off as complete', async () => {
+  const api = fakeApi();
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [tick], truncated: true },
+      poll: { ok: true, ticks: [tick] }
+    }),
+    request: api.request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 2600));
+  const state = session.state();
+  assert.match(state.message, /неполная/, 'a partial history must be labelled as partial');
+  assert.doesNotMatch(state.message, /M15|M30|H1/, 'the status line must not hard-code a timeframe the settings can change');
+  await session.disconnect();
+});
+
 test('session rejects malformed connect input without starting a worker', async () => {
   let started = false;
   const session = createMt5Session({

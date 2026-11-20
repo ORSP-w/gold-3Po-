@@ -132,7 +132,11 @@ body{background:var(--bg);color:var(--text);font:13.5px/1.35 var(--sans);letter-
 .settings-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
 .settings-head h2{margin:4px 0 0;font-size:20px;font-weight:650}
 .settings-head .square-button{width:34px;height:34px;font-size:18px}
-.settings-tabs{margin-bottom:6px}
+.settings-tabs{margin-bottom:6px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+.settings-tabs::-webkit-scrollbar{display:none}
+.settings-tabs button{flex:0 0 auto}
+@media(max-width:560px){.settings-tabs{gap:1px;padding:3px}.settings-tabs button{padding:6px 6px;font-size:10.5px}}
+@media(min-width:2400px){.settings-dialog{width:min(760px,calc(100vw - 32px))}}
 .settings-body{overflow:auto;padding:0 2px;flex:1;min-height:0}
 .settings-hint{margin:12px 0 4px;color:var(--muted);font-size:12px;line-height:1.5}
 .style-preview{margin-top:12px;border:1px solid var(--line);border-radius:16px;background:var(--chart-bg);color:var(--text);overflow:hidden}
@@ -250,3 +254,9 @@ html[data-theme="glass-light"]{--v-accent:#d9a273;--v-cta-ink:#1a1611}
 .flow-verdict.is-bullish{border-color:rgba(153,255,228,.4);color:#d6fff7}
 
 .settings-subhead{margin:18px 0 8px;font:10px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.bridge-block{display:grid;gap:8px;margin:10px 0 4px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel-soft, rgba(255,255,255,.03))}
+.bridge-block[hidden]{display:none}
+.bridge-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:space-between}
+.bridge-row span{font-size:12px;color:var(--muted)}
+.bridge-row code{font:12px var(--mono);color:var(--text);background:transparent;overflow-wrap:anywhere;flex:1 1 160px;text-align:right}
+.bridge-block small{color:var(--muted);font-size:11px;line-height:1.5}

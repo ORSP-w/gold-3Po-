@@ -32,6 +32,7 @@ let quitReady = false;
 let mt5;
 let mt5TerminalPath;
 let marketIngestToken;
+let localApiPort = null;
 const adapterDir = app.isPackaged ? path.join(process.resourcesPath, 'adapters', 'mt5') : fileURLToPath(new URL('../adapters/mt5/', import.meta.url));
 
 function registerMt5Ipc() {
@@ -72,6 +73,9 @@ function registerMt5Ipc() {
     if (!terminalDataPath) throw new Error('Сначала подключите терминал MT5.');
     return installIndicator({ source: path.join(adapterDir, 'Gold3PoLevels.mq5'), terminalPath: mt5TerminalPath, terminalDataPath });
   });
+  // The EA bridge (Gold3PoBridge.mq5) authenticates with the same token the local API expects,
+  // so the window shows it instead of sending the user into settings.json.
+  handle('bridge', () => ({ port: localApiPort, ingestToken: marketIngestToken }));
 }
 
 function logError(error) {
@@ -144,6 +148,7 @@ async function startLocalApi() {
   }).server;
 
   const address = await listen(marketServer, port);
+  localApiPort = address.port;
   localOrigin = `http://127.0.0.1:${address.port}`;
   return localOrigin;
 }

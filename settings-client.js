@@ -22,6 +22,27 @@ function status(text, kind = '') { const el = $('settingsStatus'); if (!el) retu
 function setSeg(id, value) { $(id)?.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.value === String(value))); }
 function setToggle(id, on) { const el = $(id); if (!el) return; el.classList.toggle('on', !!on); el.setAttribute('aria-pressed', String(!!on)); }
 
+// The EA bridge lives in the desktop app: the renderer only knows its port and token through IPC,
+// so in a browser the whole block stays hidden instead of showing an empty secret.
+async function renderBridge() {
+  const block = $('bridgeBlock'), note = $('bridgeUnavailable'), hint = $('bridgeOriginHint');
+  if (!block) return;
+  const api = window.goldMt5?.bridge;
+  if (!api) { block.hidden = true; if (note) note.hidden = false; return; }
+  try {
+    const info = await api();
+    const origin = `http://127.0.0.1:${info.port}`;
+    if ($('bridgeUrl')) $('bridgeUrl').textContent = origin;
+    if ($('bridgeToken')) $('bridgeToken').textContent = info.ingestToken || '—';
+    if (hint) hint.textContent = origin;
+    block.hidden = false;
+    if (note) note.hidden = true;
+  } catch (error) {
+    block.hidden = true;
+    if (note) { note.hidden = false; note.textContent = `Мост недоступен: ${error.message}`; }
+  }
+}
+
 function preview() {
   const svg = $('stylePreview'); if (!svg) return;
   const m = settings.mt5, w = m.lineStyle === 'solid' ? m.lineWidth : 1;
@@ -31,7 +52,7 @@ function preview() {
     + (m.showLabels ? `<text x="314" y="${y1 - 4}" text-anchor="end" fill="${color}" font-size="9">${text}${m.showStrength ? ' | 72%' : ''}</text>` : '');
   const candles = [[40, 46, 62], [70, 52, 70], [100, 44, 58], [130, 50, 66], [160, 40, 54], [190, 47, 60], [220, 42, 57], [250, 49, 63]]
     .map(([x, a, b], i) => `<line x1="${x}" x2="${x}" y1="${a - 6}" y2="${b + 6}" stroke="currentColor" opacity=".35"/><rect x="${x - 5}" y="${a}" width="10" height="${b - a}" rx="1.5" fill="${i % 2 ? 'var(--red)' : 'var(--cyan)'}" opacity=".75"/>`).join('');
-  svg.innerHTML = zone(18, 26, m.buyColor, 'Swing highs · TESTED') + candles + zone(80, 88, m.sellColor, 'Swing lows · UNTESTED');
+  svg.innerHTML = zone(18, 26, m.buyColor, 'Повторный максимум · ПРОВЕРЕНА') + candles + zone(80, 88, m.sellColor, 'Повторный минимум · НЕ ПРОВЕРЕНА');
 }
 
 function render() {
@@ -143,11 +164,17 @@ function bind() {
     if (response.ok) { settings = await response.json(); theme(settings.ui.theme); render(); publish(true); status('Настройки сброшены', 'ok'); }
     else status(`Не удалось сбросить (HTTP ${response.status})`, 'error');
   });
+  $('bridgeCopy')?.addEventListener('click', async () => {
+    const value = $('bridgeToken')?.textContent?.trim();
+    if (!value || value === '—') return status('Токен моста не получен', 'error');
+    try { await navigator.clipboard.writeText(value); status('Токен скопирован — вставьте его в IngestToken советника', 'ok'); }
+    catch { status('Скопируйте токен вручную: выделите его и нажмите Ctrl+C', 'error'); }
+  });
   const close = () => { if (saveTimer) { clearTimeout(saveTimer); save(); } dialog.close(); };
   $('settingsDone')?.addEventListener('click', close);
   $('settingsClose')?.addEventListener('click', close);
   dialog.addEventListener('click', e => { if (e.target === dialog) close(); });
-  const open = async () => { status(''); render(); dialog.showModal(); if (!(await load())) status('Настройки доступны после активации лицензии', 'error'); };
+  const open = async () => { status(''); render(); dialog.showModal(); void renderBridge(); if (!(await load())) status('Настройки доступны после активации лицензии', 'error'); };
   $('openSettings')?.addEventListener('click', open);
 
   // Navigation rail.

@@ -20,7 +20,7 @@ The Expert Advisor (EA) runs inside the user's logged-in MetaTrader 5 terminal. 
 1. Install and start **GOLD-3Po Market Lab**. It runs the local API on `http://127.0.0.1:8787`.
 2. In MT5, open **Tools → Options → Expert Advisors → Allow WebRequest for listed URL** and add `http://127.0.0.1:8787`.
 3. Open the installed file `resources\adapters\mt5\Gold3PoBridge.mq5` in MetaEditor and compile with F7.
-4. Open `%APPDATA%\GOLD-3Po Market Lab\settings.json` in Notepad and copy the `marketIngestToken` value.
+4. Copy the ingest token from the app: **⚙ Настройки → Отрисовка в MT5 → Мост MT5 → «Скопировать»**. The same value lives in `%APPDATA%\GOLD-3Po Market Lab\settings.json` (`marketIngestToken`) if you ever need it from disk; it is created once and does not change between launches.
 5. Attach the EA to the broker's XAUUSD chart and paste the copied value into the EA input `IngestToken`.
 6. Check `http://127.0.0.1:8787/health` for the MT5 feed and `http://127.0.0.1:8787/v1/market/analysis?symbol=XAUUSD&intervalMs=900000` for calculated bars.
 
@@ -51,7 +51,7 @@ With `DrawZones=true` (default) the EA polls `GET /v1/chart/zones?symbol=XAUUSD`
 - All objects use the `G3P_` prefix and are removed when the EA is detached.
 - If the licence is missing/expired (`402`), the EA clears the zones and shows a licence-required notice; tick ingestion continues regardless.
 
-Zones are heuristic repeated-swing estimates, not confirmed order-book depth. A reaction at a zone is probable, not guaranteed.
+Zones are built from several independent sources (swings, the previous day's high/low, session extremes, the previous week, H1/H4 swings, the volume profile and round numbers) and scored by measured past reactions plus how many sources agree. They are not confirmed order-book depth, and a reaction at a zone is probable, not guaranteed.
 
 ## Operational boundary
 
