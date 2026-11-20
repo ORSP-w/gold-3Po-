@@ -92,11 +92,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   })() : Promise.resolve();
   async function persistMany(storedEvents) { if (!dataFile || !storedEvents.length) return; await mkdir(dirname(dataFile), { recursive:true }); await appendFile(dataFile, storedEvents.map(event => JSON.stringify(event)).join('\n')+'\n'); }
   async function persist(stored) { return persistMany([stored]); }
-  // The reference the analogue search compares against: the newest signal the strategy sees now.
-  function calibratedReference(signals, bars) {
-    const latest = signals.at(-1);
-    return latest || null;
-  }
+  // Cache for the analogue search's reference pipeline, keyed by market and timeframe and
+  // invalidated when the event count moves: the panel polls on every market-analysis event,
+  // and only the threshold changes between polls.
+  const analogueCache = new Map();
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: MAX_EVENTS, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
@@ -201,7 +200,6 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
-      const activeReplay = await setups.activeDefinition();
       const replaySettings = await settings.get();
       return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, zoneOptions: replaySettings.zones, footprintOptions: replaySettings.footprint }) });
     }
@@ -248,10 +246,11 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
       // Pattern memory: every setup the simulation closed is remembered once, so later signals
       // can be compared against what actually happened to similar ones. Recording is best-effort —
-      // a memory failure never blocks the signals the trader asked for.
+      // a memory failure never blocks the signals the trader asked for — and the file is written
+      // once per batch, not once per record.
       let patternSummary = { recorded: 0 };
       try {
-        const results = await patterns.recordMany(signals, simulation.trades, analysis.bars, symbol);
+        const results = await patterns.recordMany(signals, simulation.trades, analysis.bars, symbol, intervalMs);
         patternSummary = { recorded: results.filter(r => r.recorded).length, memory: (await patterns.list()).count };
       } catch (error) { patternSummary = { recorded: 0, error: error.message }; }
       return json(res, 200, { symbol, source, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, patternMemory: patternSummary, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Технические оценки — это веса правил, а не вероятности. Вероятность показывается только после 30 закрытых сделок в том же направлении.' });
@@ -267,12 +266,20 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
       const analogueSettings = await settings.get();
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
-      const signals = generateSignals(analysis.bars, active.strategy);
-      const reference = calibratedReference(signals, analysis.bars);
-      if (!reference) return json(res, 200, { symbol, source, reference: null, count: 0, analogues: [], winRate: null, calibrated: false, memory: (await patterns.list()).count, message: 'В текущей истории нет подходящего снятия ликвидности, с чем можно сравнивать.' });
+      // The reference pipeline (analysis + signals) is cached per symbol/source/interval: the panel
+      // auto-refreshes on every market-analysis event, and only the threshold changes between
+      // those polls, so the heavy work must not re-run each time. New events invalidate the cache.
+      const cacheKey = source + ':' + symbol + ':' + intervalMs;
+      let cached = analogueCache.get(cacheKey);
+      if (!cached || cached.eventCount !== selected.length) {
+        const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
+        const signals = generateSignals(analysis.bars, active.strategy);
+        cached = { eventCount: selected.length, reference: signals.at(-1) || null, bars: analysis.bars };
+        analogueCache.set(cacheKey, cached);
+      }
+      if (!cached.reference) return json(res, 200, { symbol, source, reference: null, count: 0, analogues: [], winRate: null, calibrated: false, memory: (await patterns.list()).count, message: 'В текущей истории нет подходящего снятия ликвидности, с чем можно сравнивать.' });
       try {
-        const result = await patterns.analoguesForSignal(reference, analysis.bars, symbol, { threshold });
+        const result = await patterns.analoguesForSignal(cached.reference, cached.bars, symbol, intervalMs, { threshold });
         return json(res, 200, { symbol, source, threshold, ...result, caveat: 'Аналоги — исторические наблюдения похожих сетапов, а не прогноз. Винрейт показывается только после 30 похожих случаев.' });
       } catch (error) { return json(res, 422, { error: 'invalid_pattern_reference', message: error.message }); }
     }

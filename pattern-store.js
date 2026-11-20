@@ -31,12 +31,15 @@ export function validatePattern(input) {
   if (providedFingerprint !== undefined && typeof providedFingerprint !== 'string') throw new TypeError('Pattern fingerprint must be a string when present');
   input = rest;
   for (const key of Object.keys(input)) {
-    if (!['symbol','side','signalTime','signalIndex','session','barTime','atr','sweepLevel','entryIndex','exitIndex','exitReason','netR','bodyRatio','closeLocation','volumeRatio','delta','deltaRatio','imbalanceCount','stackCount','sweepReclaimed','rejection','closeEdge','stacked','deltaAgree','pocShift'].includes(key)) throw new TypeError(`Unknown pattern field: ${key}`);
+    if (!['symbol','side','signalTime','signalIndex','session','barTime','intervalMs','atr','sweepLevel','entryIndex','exitIndex','exitTime','exitReason','netR','bodyRatio','closeLocation','volumeRatio','delta','deltaRatio','imbalanceCount','stackCount','sweepReclaimed','rejection','closeEdge','stacked','deltaAgree','pocShift'].includes(key)) throw new TypeError(`Unknown pattern field: ${key}`);
   }
   const p = { ...input };
   p.symbol = String(p.symbol || '').toUpperCase();
   if (!/^(?:XAUUSD|GOLD)[A-Z0-9._#+-]{0,20}$/.test(p.symbol) && !/^GC[A-Z0-9]*$/.test(p.symbol)) throw new TypeError('Pattern symbol must be gold (XAUUSD or GC futures)');
   if (!sides.includes(p.side)) throw new TypeError('Pattern side must be long or short');
+  // The timeframe the pattern was observed at: a 5m shape is not an analogue of a 15m setup.
+  p.intervalMs = Number(p.intervalMs);
+  if (!Number.isInteger(p.intervalMs) || p.intervalMs < 60000 || p.intervalMs > 86400000) throw new TypeError('Pattern intervalMs must be an integer between 60000 and 86400000');
   const time = Date.parse(p.signalTime);
   if (!finite(time)) throw new TypeError('Pattern signalTime must be an ISO timestamp');
   p.signalTime = new Date(time).toISOString();
@@ -45,6 +48,9 @@ export function validatePattern(input) {
     if (!Number.isInteger(p[key]) || p[key] < 0 || p[key] > 100000) throw new TypeError(`Pattern ${key} must be an integer 0..100000`);
   }
   if (p.signalIndex > p.entryIndex || p.entryIndex > p.exitIndex) throw new TypeError('Pattern indices must be ordered signal <= entry <= exit');
+  // When the outcome became known. Absolute, so out-of-sample checks survive window shifts.
+  if (p.exitTime !== undefined && p.exitTime !== null && !finite(Date.parse(p.exitTime))) throw new TypeError('Pattern exitTime must be an ISO timestamp when present');
+  p.exitTime = p.exitTime ? new Date(Date.parse(p.exitTime)).toISOString() : null;
   for (const key of ['atr', 'sweepLevel', 'netR', 'bodyRatio', 'closeLocation', 'volumeRatio', 'delta', 'deltaRatio', 'pocShift']) {
     p[key] = Number(p[key]);
     if (!finite(p[key])) throw new TypeError(`Pattern ${key} must be a number`);
@@ -66,17 +72,6 @@ export function validatePattern(input) {
   p.fingerprint = patternFingerprint(p);
   return p;
 }
-
-// Trading-session bucket from the signal's UTC hour, matching the zone engine's session split.
-function sessionOf(timeMs) {
-  const hour = new Date(timeMs).getUTCHours();
-  if (hour >= 0 && hour < 7) return 'asia';
-  if (hour >= 7 && hour < 12) return 'london';
-  if (hour >= 12 && hour < 21) return 'newyork';
-  return 'offhours';
-}
-
-export const SESSION_LABELS = { asia: 'Азия', london: 'Лондон', newyork: 'Нью-Йорк', offhours: 'Вне сессии' };
 
 // Similarity: how much two patterns agree on the facts the strategy itself weighs.
 // Each axis is 0 or 1; the total is a share in 0..1. Booleans compare exactly, continuous
@@ -102,24 +97,31 @@ export function similarity(a, b) {
   return axes.reduce((sum, v) => sum + v, 0) / axes.length;
 }
 
-// Find the closed patterns most like the reference, older ones first (walk-forward: only
-// the past may judge the present). Fewer than minSamples analogues never yields a win rate.
+// Find the closed patterns most like the reference. Analogues are scoped to the same market
+// (symbol) and the same timeframe (intervalMs) — a GC-futures or 5-minute shape is not an
+// analogue of an XAUUSD 15m setup — and only the past may judge the present, gated on
+// absolute signal time so a short fresh history cannot misread accumulated memory.
+// Fewer than minSamples analogues never yields a win rate.
 export function findAnalogues(reference, observations, { minSamples = MIN_CALIBRATION_SAMPLES, threshold = 0.8, limit = 50 } = {}) {
   if (!Number.isInteger(minSamples) || minSamples < 1) throw new TypeError('minSamples must be a positive integer');
   if (!finite(threshold) || threshold < 0.5 || threshold > 1) throw new TypeError('threshold must be between 0.5 and 1');
   if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new TypeError('limit must be an integer 1..500');
+  const referenceTime = Date.parse(reference.signalTime);
   const ranked = [];
   for (const observation of observations) {
-    if (observation.signalIndex >= reference.signalIndex) continue; // the past only
+    if (observation.symbol !== reference.symbol) continue;      // the same market only
+    if (observation.intervalMs !== reference.intervalMs) continue; // the same timeframe only
+    if (Date.parse(observation.signalTime) >= referenceTime) continue; // the past only
     const score = similarity(reference, observation);
     if (score < threshold) continue;
     ranked.push({ score: Number(score.toFixed(4)), pattern: observation });
   }
-  ranked.sort((x, y) => y.score - x.score || x.pattern.signalIndex - y.pattern.signalIndex);
+  ranked.sort((x, y) => y.score - x.score || Date.parse(x.pattern.signalTime) - Date.parse(y.pattern.signalTime));
   const analogues = ranked.slice(0, limit);
   const wins = analogues.filter(a => a.pattern.netR > 0).length;
   const losses = analogues.filter(a => a.pattern.netR < 0).length;
-  const outOfSample = analogues.filter(a => a.pattern.exitIndex < reference.signalIndex).length;
+  const referenceTs = referenceTime;
+  const outOfSample = analogues.filter(a => a.pattern.exitTime ? Date.parse(a.pattern.exitTime) <= referenceTs : Date.parse(a.pattern.signalTime) <= referenceTs).length;
   const expectancy = analogues.length ? analogues.reduce((sum, a) => sum + a.pattern.netR, 0) / analogues.length : null;
   return {
     count: analogues.length,
@@ -133,13 +135,22 @@ export function findAnalogues(reference, observations, { minSamples = MIN_CALIBR
 }
 
 function publicPattern(p) {
-  return { id: p.id, fingerprint: p.fingerprint, symbol: p.symbol, side: p.side, session: p.session, signalTime: p.signalTime, signalIndex: p.signalIndex, entryIndex: p.entryIndex, exitIndex: p.exitIndex, exitReason: p.exitReason, netR: p.netR, technicalScore: p.technicalScore };
+  return { id: p.id, fingerprint: p.fingerprint, symbol: p.symbol, intervalMs: p.intervalMs, side: p.side, session: p.session, signalTime: p.signalTime, signalIndex: p.signalIndex, entryIndex: p.entryIndex, exitIndex: p.exitIndex, exitTime: p.exitTime, exitReason: p.exitReason, netR: p.netR, technicalScore: p.technicalScore };
 }
 
-// Build the observation the memory keeps, from a signal the strategy produced and the
-// trade the backtest engine closed for it. Market facts only, as they were at the signal.
-export function observationFrom(signal, trade, bars, symbol) {
-  if (!signal || !trade || !Array.isArray(bars)) throw new TypeError('Invalid observation input');
+// Trading-session bucket from the signal's UTC hour, matching the zone engine's session split.
+function sessionOf(timeMs) {
+  const hour = new Date(timeMs).getUTCHours();
+  if (hour >= 0 && hour < 7) return 'asia';
+  if (hour >= 7 && hour < 12) return 'london';
+  if (hour >= 12 && hour < 21) return 'newyork';
+  return 'offhours';
+}
+
+// One feature extractor for both the stored observation and the live reference, so the two
+// cannot drift apart and silently skew similarity scores. Only the outcome differs: a stored
+// pattern carries the simulated trade's result, a live reference zeroes it.
+function featuresFromBar(signal, bars, symbol, intervalMs) {
   const bar = bars[signal.index];
   if (!bar) throw new TypeError('Signal bar not found in bars');
   const range = Math.max(1e-9, bar.h - bar.l);
@@ -148,12 +159,11 @@ export function observationFrom(signal, trade, bars, symbol) {
   const medianVolume = prior.length ? median(prior.map(b => Number(b.volume) || 0)) : volume;
   const directionalKnown = (bar.unknown || 0) === 0 && volume > 0;
   const delta = bar.delta ?? ((bar.ask || 0) - (bar.bid || 0));
-  return validatePattern({
-    symbol, side: signal.side,
+  return {
+    symbol, intervalMs, side: signal.side,
     signalTime: bar.time, signalIndex: signal.index, barTime: bar.time,
     session: sessionOf(Date.parse(bar.time)),
     atr: signal.atr ?? 0, sweepLevel: signal.level,
-    entryIndex: trade.entryIndex, exitIndex: trade.exitIndex, exitReason: trade.exitReason, netR: trade.netR,
     bodyRatio: Math.abs(bar.c - bar.o) / range, closeLocation: (bar.c - bar.l) / range,
     volumeRatio: medianVolume > 0 ? volume / medianVolume : 1,
     delta, deltaRatio: bar.deltaRatio ?? 0, pocShift: 0,
@@ -163,6 +173,16 @@ export function observationFrom(signal, trade, bars, symbol) {
     closeEdge: (signal.side === 'long' ? (bar.c - bar.l) / range >= 0.65 : (bar.c - bar.l) / range <= 0.35),
     stacked: (bar.stackedImbalances || []).some(item => item.side === (signal.side === 'long' ? 'buy' : 'sell')),
     deltaAgree: directionalKnown && ((signal.side === 'long' && delta > 0) || (signal.side === 'short' && delta < 0))
+  };
+}
+
+// Build the observation the memory keeps, from a signal the strategy produced and the
+// trade the backtest engine closed for it. Market facts only, as they were at the signal.
+export function observationFrom(signal, trade, bars, symbol, intervalMs) {
+  if (!signal || !trade || !Array.isArray(bars)) throw new TypeError('Invalid observation input');
+  return validatePattern({
+    ...featuresFromBar(signal, bars, symbol, intervalMs),
+    entryIndex: trade.entryIndex, exitIndex: trade.exitIndex, exitTime: trade.exitTime ?? null, exitReason: trade.exitReason, netR: trade.netR
   });
 }
 
@@ -176,18 +196,24 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
     if (loaded) return;
     loaded = true;
     if (!file) return;
-    try {
-      const stored = JSON.parse(await readFile(file, 'utf8'));
-      if (Array.isArray(stored.observations)) {
-        observations = stored.observations.map(raw => {
-          // The persisted envelope (id, recordedAt, technicalScore, the stored fingerprint) is
-          // stripped before validation: the pattern itself is re-validated and re-fingerprinted.
-          const { id, recordedAt, technicalScore, fingerprint, ...pattern } = raw;
-          const clean = validatePattern(pattern);
-          return { ...clean, id: typeof id === 'string' && id.length <= 40 ? id : clean.fingerprint, recordedAt: recordedAt || null, technicalScore: Number(technicalScore) || null };
-        });
+    let stored = null;
+    try { stored = JSON.parse(await readFile(file, 'utf8')); } catch { /* fresh memory */ }
+    if (!Array.isArray(stored?.observations)) return;
+    // Validate per observation: one malformed or semantically invalid record is skipped (and
+    // logged, so a corrupt file is distinguishable from a fresh install), never a reason to
+    // silently drop the whole accumulated memory — which would break the append-only contract.
+    observations = [];
+    for (const raw of stored.observations) {
+      try {
+        // The persisted envelope (id, recordedAt, technicalScore, the stored fingerprint) is
+        // stripped before validation: the pattern itself is re-validated and re-fingerprinted.
+        const { id, recordedAt, technicalScore, fingerprint, ...pattern } = raw;
+        const clean = validatePattern(pattern);
+        observations.push({ ...clean, id: typeof id === 'string' && id.length <= 40 ? id : clean.fingerprint, recordedAt: recordedAt || null, technicalScore: Number(technicalScore) || null });
+      } catch (error) {
+        process.stderr.write(`[pattern-store] skipping an invalid stored observation: ${error.message}\n`);
       }
-    } catch { /* fresh memory */ }
+    }
   }
 
   async function persist() {
@@ -198,73 +224,60 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
     await rename(tmp, file);
   }
 
-  // Append-only: the same signal (fingerprint + entry/exit) is remembered once.
-  async function record(signal, trade, bars, symbol) {
+  // Identity is window-independent: fingerprint + signalTime + intervalMs. Array indices shift
+  // as the analysis window slides, so they must never key the "remembered once" guarantee.
+  const sameSetup = (a, b) => a.fingerprint === b.fingerprint && a.signalTime === b.signalTime && a.intervalMs === b.intervalMs;
+
+  // Append-only: the same setup is remembered once. The caller passes batched=true when many
+  // records follow in one call, so the file is rewritten once per batch, not once per record.
+  async function record(signal, trade, bars, symbol, intervalMs, { batched = false } = {}) {
     await load();
-    const observation = { ...observationFrom(signal, trade, bars, symbol), technicalScore: Number(signal.technicalScore) || null, recordedAt: new Date(now()).toISOString() };
-    if (observations.some(o => o.fingerprint === observation.fingerprint && o.entryIndex === observation.entryIndex)) return { recorded: false, deduplicated: true, observation: publicPattern(observations.find(o => o.fingerprint === observation.fingerprint && o.entryIndex === observation.entryIndex)) };
+    const observation = { ...observationFrom(signal, trade, bars, symbol, intervalMs), technicalScore: Number(signal.technicalScore) || null, recordedAt: new Date(now()).toISOString() };
+    const existing = observations.find(o => sameSetup(o, observation));
+    if (existing) return { recorded: false, deduplicated: true, observation: publicPattern(existing) };
     observation.id = 'PTN-' + randomBytes(5).toString('hex');
     observations.push(observation);
-    await persist();
+    if (!batched) await persist();
     return { recorded: true, deduplicated: false, observation: publicPattern(observation) };
   }
 
-  async function recordMany(signals, trades, bars, symbol) {
+  // One persist for the whole batch: recording a large closed history must not rewrite the
+  // memory file hundreds of times inside a single signals call.
+  async function recordMany(signals, trades, bars, symbol, intervalMs, { maxRecords = 500 } = {}) {
+    await load();
     const results = [];
+    let recorded = 0;
     for (const trade of trades) {
+      if (recorded >= maxRecords) break; // a cap: one call can never flood the memory
       const signal = signals.find(s => s.index === trade.signalIndex);
-      if (signal) results.push(await record(signal, trade, bars, symbol));
+      if (!signal) continue;
+      const result = await record(signal, trade, bars, symbol, intervalMs, { batched: true });
+      if (result.recorded) recorded += 1;
+      results.push(result);
     }
+    if (recorded > 0) await persist();
     return results;
   }
 
-  async function analogues(referenceInput, options = {}) {
-    await load();
-    const reference = validatePattern(referenceInput);
-    const result = findAnalogues(reference, observations, options);
-    return { reference: publicPattern({ ...reference, id: reference.id || 'REF' }), ...result, memory: observations.length };
-  }
-
   // The reference pattern built from the live signal the page is looking at.
-  async function analoguesForSignal(signal, bars, symbol, options = {}) {
+  async function analoguesForSignal(signal, bars, symbol, intervalMs, options = {}) {
     await load();
-    const trade = null;
     // A live signal has no closed outcome yet: build the reference from the bar alone.
-    const reference = referenceFromSignal(signal, bars, symbol);
+    const reference = referenceFromSignal(signal, bars, symbol, intervalMs);
     const result = findAnalogues(reference, observations, options);
     return { reference: publicPattern({ ...reference, id: 'REF' }), ...result, memory: observations.length };
   }
 
   async function list() { await load(); return { count: observations.length, observations: observations.map(publicPattern) }; }
 
-  return { record, recordMany, analogues, analoguesForSignal, list };
+  return { record, recordMany, analoguesForSignal, list };
 }
 
 // A reference for a signal that has not closed yet: outcome fields are zeroed, which
 // keeps the fingerprint comparable on every axis the similarity actually reads.
-function referenceFromSignal(signal, bars, symbol) {
-  const bar = bars[signal.index];
-  if (!bar) throw new TypeError('Signal bar not found in bars');
-  const range = Math.max(1e-9, bar.h - bar.l);
-  const volume = Number(bar.volume) || 0;
-  const prior = bars.slice(Math.max(0, signal.index - 20), signal.index);
-  const medianVolume = prior.length ? median(prior.map(b => Number(b.volume) || 0)) : volume;
-  const directionalKnown = (bar.unknown || 0) === 0 && volume > 0;
-  const delta = bar.delta ?? ((bar.ask || 0) - (bar.bid || 0));
+function referenceFromSignal(signal, bars, symbol, intervalMs) {
   return validatePattern({
-    symbol, side: signal.side,
-    signalTime: bar.time, signalIndex: signal.index, barTime: bar.time,
-    session: sessionOf(Date.parse(bar.time)),
-    atr: signal.atr ?? 0, sweepLevel: signal.level,
-    entryIndex: signal.index, exitIndex: signal.index, exitReason: 'time', netR: 0,
-    bodyRatio: Math.abs(bar.c - bar.o) / range, closeLocation: (bar.c - bar.l) / range,
-    volumeRatio: medianVolume > 0 ? volume / medianVolume : 1,
-    delta, deltaRatio: bar.deltaRatio ?? 0, pocShift: 0,
-    imbalanceCount: (bar.imbalances || []).length, stackCount: (bar.stackedImbalances || []).length,
-    sweepReclaimed: Boolean((bar.sweeps || []).some(s => s.reclaimed)),
-    rejection: (signal.side === 'long' ? bar.c > bar.o : bar.c < bar.o),
-    closeEdge: (signal.side === 'long' ? (bar.c - bar.l) / range >= 0.65 : (bar.c - bar.l) / range <= 0.35),
-    stacked: (bar.stackedImbalances || []).length > 0,
-    deltaAgree: directionalKnown && ((signal.side === 'long' && delta > 0) || (signal.side === 'short' && delta < 0))
+    ...featuresFromBar(signal, bars, symbol, intervalMs),
+    entryIndex: signal.index, exitIndex: signal.index, exitTime: null, exitReason: 'time', netR: 0
   });
 }

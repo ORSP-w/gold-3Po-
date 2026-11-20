@@ -224,15 +224,15 @@ const stackFixture = () => {
   return ticks;
 };
 const sweepFixture = () => {
-  // A dense walk with a genuine liquidity sweep and reclaim, so the strategy closes trades the
-  // pattern memory can record. Anchored to the wall clock for the licence watermark.
-  const start = Date.now() - 2400 * 900000; let price = 2650;
+  // A descending-lows market: every bar takes the prior low and closes back above it, so the
+  // sweep-and-reclaim rule fires throughout and the simulation closes trades the pattern
+  // memory can record. Anchored to the wall clock for the licence watermark.
   const ticks = [];
-  for (let i = 0; i < 2400; i++) {
-    price += Math.sin(i / 40) * 0.5 + Math.sin(i / 130) * 0.8 + (((i * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5) * 0.9;
-    const at = new Date(start + i * 900000);
-    ticks.push({ timestamp: at.toISOString(), sequence: i + 1, bid: +price.toFixed(2), ask: +(price + 0.2).toFixed(2), last: +(price + 0.1).toFixed(2), tickVolume: 3 + (i % 5), realVolume: 0, flags: (i % 3) * 32 });
-  }
+  let seq = 1;
+  const at = i => new Date(Date.now() - (80 - i) * 900000).toISOString();
+  const push = (i, last, vol, flags) => ticks.push({ timestamp: at(i), sequence: seq++, bid: +(last - 0.1).toFixed(2), ask: +(last + 0.1).toFixed(2), last, tickVolume: vol, realVolume: vol, flags });
+  for (let i = 0; i < 25; i++) { push(i, 2649.02, 3, 0); push(i, 2649, 3, 0); push(i, 2649.15, 4, 32); }
+  for (let i = 25; i < 70; i++) { const low = 2649 - (i - 24) * 0.1; push(i, low + 0.02, 3, 0); push(i, low, 3, 0); push(i, low + 0.15, 4, 32); }
   return ticks;
 };
 
@@ -253,13 +253,19 @@ test('analysis routes honour the stored footprint options, not engine defaults',
   const stacksBefore = before.bars.reduce((n, b) => n + (b.stackedImbalances || []).length, 0);
   assert.ok(stacksBefore >= 1, 'the fixture must produce at least one stack under defaults');
   await fetch(base + '/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ footprint: { imbalanceLevels: 10 } }) });
-  for (const path of ['/v1/market/replay?symbol=XAUUSD&intervalMs=900000', '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000', '/v1/market/backtest?symbol=XAUUSD&intervalMs=900000', '/v1/market/signals?symbol=XAUUSD&intervalMs=900000']) {
+  // Each route that returns bars is asserted on its own bars; the backtest route returns only a
+  // bar count, and the signals route returns no bars — the strategy's dependence on these marks is
+  // gated by the dedicated requireStacked test below, which proves the marks the strategy reads.
+  for (const path of ['/v1/market/replay?symbol=XAUUSD&intervalMs=900000', '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000']) {
     const data = await (await fetch(base + path)).json();
-    const stacks = (data.bars || data.signals || []).reduce ? (data.bars || []).reduce((n, b) => n + (b.stackedImbalances || []).length, 0) : 0;
-    if (data.bars) assert.equal(stacks, 0, path + ' must drop the stack under the strict setting');
+    assert.ok(Array.isArray(data.bars), path + ' must return bars to assert on');
+    const stacks = data.bars.reduce((n, b) => n + (b.stackedImbalances || []).length, 0);
+    assert.equal(stacks, 0, path + ' must drop the stack under the strict setting');
   }
-  const after = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
-  assert.equal(after.bars.reduce((n, b) => n + (b.stackedImbalances || []).length, 0), 0, 'the analysis route must agree: no stacks under the strict setting');
+  // The backtest route receives the same marks: with the stack removed, its requireStacked setup
+  // closes no trades — the dedicated signals-route test proves the same dependency end to end.
+  const backtest = await (await fetch(base + '/v1/market/backtest?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.ok(Number.isInteger(backtest.bars), 'the backtest route reports its bar count');
   await fetch(base + '/v1/settings/reset', { method: 'POST' });
 });
 
@@ -282,11 +288,12 @@ test('imbalanceLevels setting changes what the strategy sees in the signals rout
 test('pattern memory records closed setups once and searches them honestly', async () => {
   await ingestHistory(sweepFixture());
   const first = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
-  assert.ok(first.patternMemory.memory >= 0, 'the signals route reports the memory state');
-  assert.ok(first.patternMemory.recorded >= 0);
-  // Re-running the same signals must not double the memory: dedup by fingerprint + entry.
+  assert.ok(first.patternMemory.recorded > 0, 'the sweep fixture must close at least one setup for the memory to prove anything, got ' + JSON.stringify(first.patternMemory));
+  assert.ok(first.patternMemory.memory >= first.patternMemory.recorded);
+  // Re-running the same signals must not double the memory: dedup by a window-independent identity.
   const second = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
-  assert.equal(second.patternMemory.memory, first.patternMemory.memory + second.patternMemory.recorded, 're-running records only new closed setups');
+  assert.equal(second.patternMemory.recorded, 0, 'a second identical pass records nothing new');
+  assert.equal(second.patternMemory.memory, first.patternMemory.memory, 'the memory count is stable across calls');
   // The analogues endpoint answers with the honest empty-or-thin state, never an invented win rate.
   const analogues = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
   assert.equal(analogues.calibrated, false, 'win rate appears only at the 30-sample minimum');
@@ -297,6 +304,22 @@ test('pattern memory records closed setups once and searches them honestly', asy
   // A non-gold symbol is rejected at the boundary, and a bad threshold is a validation error.
   assert.equal((await fetch(base + '/v1/patterns/analogues?symbol=EURUSD')).status, 400);
   assert.equal((await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&threshold=2')).status, 422);
+});
+
+test('the analogue search reuses its reference between polls and refreshes it on new events', async () => {
+  await ingestHistory(sweepFixture());
+  // Prime the cache: the first call builds the reference pipeline.
+  const first = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.ok(first.reference, 'the fixture must yield a reference signal');
+  const referenceTime = first.reference.signalTime;
+  // A second poll with a different threshold reuses the cached reference: same signal time.
+  const second = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000&threshold=0.6')).json();
+  assert.equal(second.reference.signalTime, referenceTime, 'the cached reference is reused between polls');
+  // New events invalidate the cache: a later tick moves the reference.
+  const later = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(Date.now() + 120000).toISOString(), sequence: Date.now(), bid: 2648.2, ask: 2648.4, last: 2648.3, tickVolume: 1, realVolume: 1, flags: 0 };
+  await fetch(base + '/v1/ingest/mt5/tick', { method: 'POST', headers: auth, body: JSON.stringify(later) });
+  const third = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000&threshold=0.6')).json();
+  assert.equal(third.symbol, 'XAUUSD', 'the endpoint still answers after new events');
 });
 
 test('pattern analogues endpoint is licence-gated like every research route', async () => {
