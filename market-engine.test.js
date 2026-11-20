@@ -142,6 +142,19 @@ test('zone geometry is volatility-relative (same zones at any price scale)',()=>
  a.forEach((z,i)=>{assert.ok(Math.abs(b[i].low/10-z.low)<1e-3*z.low);assert.equal(b[i].touches,z.touches);});
 });
 
+test('every zone carries measured reaction evidence, not only chart geometry', () => {
+ const zones=detectLiquidityZones(goldBars(),0.1);
+ assert.ok(zones.length>=3);
+ for(const z of zones){
+  assert.ok(z.reactions,'zone must expose measured reactions');
+  for(const key of ['touches','respected','broken','neutral'])assert.ok(Number.isInteger(z.reactions[key]),key+' must be a count');
+  assert.equal(z.reactions.touches,z.reactions.respected+z.reactions.broken+z.reactions.neutral);
+  assert.ok(z.reactions.rate>=0&&z.reactions.rate<=1,'measured rate is a probability');
+  assert.ok(z.factors.measured>=0&&z.factors.measured<=1,'measured factor stays normalised');
+  assert.ok(Math.abs(z.factors.measured-z.reactions.rate)<=0.01,'the measured factor mirrors the measured rate');
+ }
+});
+
 test('zone settings are validated',()=>{
  assert.deepEqual(validateZoneOptions({}),{...DEFAULT_ZONE_OPTIONS});
  assert.throws(()=>validateZoneOptions({maxZones:0}),/maxZones/);

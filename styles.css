@@ -180,3 +180,6 @@ html[data-theme="glass-light"] .segmented button.selected{color:var(--text);back
  .chart-empty{position:static;padding:18px 12px}
  .chart-empty p,.chart-empty small{max-width:100%}
 }
+
+/* Измеренная реакция цены у зоны: сколько касаний удержались, сколько пробили. */
+.zone-reaction{display:block;font:9px var(--mono);letter-spacing:.04em;color:var(--muted-2);margin-top:2px}
