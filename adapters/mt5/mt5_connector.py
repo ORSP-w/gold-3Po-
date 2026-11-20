@@ -33,6 +33,84 @@ class WorkerError(Exception):
         self.mt5_code = mt5_code
 
 
+TERMINAL_LOGS = os.path.join("%APPDATA%", "MetaQuotes", "Terminal")
+# «0 14:22:33 '68533333': authorization on MEXIntGroup-Demo failed (Invalid account)»
+AUTH_FAILED = re.compile(r"'(\d{1,20})':\s+authorization on (\S+) failed(?:\s*\(([^)]{0,160})\))?")
+NO_DEMO_GROUPS = re.compile(r"no demo/preliminary groups on server side")
+
+
+def plain(value, limit):
+    """External text becomes a short printable fragment: no controls, no surprises in the window."""
+    value = "".join(ch if ch.isprintable() else " " for ch in value)
+    return " ".join(value.split())[:limit]
+
+
+def journal_text(data):
+    """Journal files are UTF-8 or the system code page, and a BOM is the only hint that one is UTF-16."""
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        return data.decode("utf-16", "replace")
+    if data.count(0) > len(data) // 4:
+        return data.decode("utf-16-le", "replace")
+    for encoding in ("utf-8", "cp1251"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("latin-1", "replace")
+
+
+def journal_lines(root=None, keep=80):
+    """Tail of the journal the running MT5 terminal writes, newest file first."""
+    root = root or os.path.expandvars(TERMINAL_LOGS)
+    files = []
+    try:
+        for name in os.listdir(root):
+            folder = os.path.join(root, name, "logs")
+            if not os.path.isdir(folder):
+                continue
+            for entry in os.listdir(folder):
+                if entry.lower().endswith(".log"):
+                    files.append(os.path.join(folder, entry))
+        if not files:
+            return []
+        newest = max(files, key=os.path.getmtime)
+        with open(newest, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - 32_768))
+            data = handle.read()
+    except OSError:
+        return []
+    return [line.strip() for line in journal_text(data).splitlines() if line.strip()][-keep:]
+
+
+def journal_hint(root=None):
+    """Why MT5 itself could not get in, said in our own words.
+
+    The terminal logs the real reason — «'68533333': authorization on MEXIntGroup-Demo failed
+    (Invalid account)» — while initialize() can only report «IPC timeout». Without this the window
+    sends the user to check the executable path, which is never what is wrong when an account is
+    simply not accepted by the broker.
+    """
+    account = server = why = ""
+    no_demo = False
+    for line in reversed(journal_lines(root)):
+        found = AUTH_FAILED.search(line)
+        if found and not account:
+            account, server, why = found.group(1), plain(found.group(2), 64), plain(found.group(3) or "", 80)
+        if NO_DEMO_GROUPS.search(line):
+            no_demo = True
+        if account and no_demo:
+            break
+    if account:
+        reason = f" ({why})" if why else ""
+        return (f"MT5 rejected the login: account {account} is not authorized on {server}{reason}."
+                " Open MT5, log in to that account by hand, then connect again.")
+    if no_demo:
+        return ("The broker server has no demo groups, so this account cannot be opened there."
+                " Check the server name in MT5, then connect again.")
+    return ""
+
+
 def mt5_error(api, code, message):
     # Do not forward the API's error text: only fixed messages and known codes.
     try:
@@ -126,6 +204,8 @@ class Worker:
         password = text(command, "password", 1024, strip=False)
         server = text(command, "server", 256)
         symbol = text(command, "symbol", 128)
+        if terminal_path and not os.path.isfile(terminal_path):
+            raise WorkerError("terminal_path_missing", "The MT5 terminal executable is not at that path. Choose terminal64.exe in the MT5 folder.")
         try:
             if self.api is None:
                 try:
@@ -137,7 +217,9 @@ class Worker:
             except Exception:
                 initialized = False
             if not initialized:
-                raise mt5_error(self.api, "initialize_failed", "Could not attach to MT5. Check the terminal executable path and open MT5.")
+                hint = journal_hint()
+                raise mt5_error(self.api, "initialize_failed", "Could not attach to MT5." + (f" {hint}" if hint else
+                    " Open MT5 by hand, log in, wait for quotes, then connect again."))
             if terminal_path:
                 terminal = self.api.terminal_info()
                 if terminal is None:
@@ -338,5 +420,24 @@ def main():
             pass  # parent closed its pipes or requested shutdown
 
 
+def selftest():
+    """The shipped message is what tells an engineer why MT5 would not attach: keep it checked."""
+    import tempfile
+    body = ("0\t10:00:04\tMEXIntGroup-Demo: no demo/preliminary groups on server side\n"
+            "0\t10:00:05\t'68533333': authorization on MEXIntGroup-Demo failed (Invalid account)\n")
+    for encoding in ("utf-8", "cp1251", "utf-16", "utf-16-le"):
+        root = os.path.join(tempfile.mkdtemp(), "Terminal")
+        os.makedirs(os.path.join(root, "ABC", "logs"))
+        with open(os.path.join(root, "ABC", "logs", "20261120.log"), "wb") as handle:
+            handle.write(body.encode(encoding))
+        hint = journal_hint(root)
+        assert "68533333" in hint and "MEXIntGroup-Demo" in hint and "Invalid account" in hint, (encoding, hint)
+    assert journal_hint(os.path.join(tempfile.mkdtemp(), "none")) == ""
+    print("selftest: ok")
+
+
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--selftest"]:
+        selftest()
+    else:
+        main()
