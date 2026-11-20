@@ -15,11 +15,23 @@ test('snapshot format matches the indicator contract', () => {
   const lines = text.split('\r\n');
   assert.equal(lines[0], 'G3P2,1795000000,XAUUSDm,1');
   assert.equal(lines[1], 'STYLE,#FF0000,#FF0000,SOLID,2,0,1,1', 'default: red solid lines, width 2');
-  assert.equal(lines[2], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,UNTESTED,Repeated swing lows - role flip');
+  assert.equal(lines[2], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,НЕ ПРОВЕРЕНА,Повторный минимум - смена роли');
   assert.equal(lines[3], 'END');
   assert.equal(encodeSnapshot('XAUUSD', []).split('\r\n')[0], 'G3P2,' + Math.floor(Date.now() / 1000) + ',XAUUSD,0');
   const noState = encodeSnapshot('XAUUSD', [{ ...zone, state: undefined }]);
-  assert.ok(noState.includes(',UNTESTED,Zone\r\n'), 'missing state and label default to non-empty tokens');
+  assert.ok(noState.includes(',НАЙДЕНА,Уровень\r\n'), 'missing state and label fall back to what the panel shows');
+});
+
+test('the MT5 chart reads the same Russian labels as the panel', () => {
+  const rows = encodeSnapshot('XAUUSD', [
+    { ...zone, id: 'L1', label: 'Prior day high', state: 'TESTED' },
+    { ...zone, id: 'L2', label: 'Asia low', state: 'SWEPT' },
+    { ...zone, id: 'L3', label: 'Value area high' }
+  ]).split('\r\n').slice(2, 5);
+  assert.ok(rows[0].endsWith(',ПРОВЕРЕНА,Максимум прошлого дня'), 'a source label must reach MT5 translated');
+  assert.ok(rows[1].endsWith(',ПРОБИТА,Минимум азиатской сессии'));
+  assert.ok(rows[2].endsWith(',НЕ ПРОВЕРЕНА,Верх зоны стоимости'));
+  assert.ok(!rows.some(row => /Prior day|Asia|Value area/.test(row)), 'no English label leaks onto the MT5 chart');
 });
 
 test('snapshot carries the drawing style from the app settings', () => {

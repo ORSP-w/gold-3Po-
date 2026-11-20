@@ -1,4 +1,5 @@
 import { barDelta, totalVolume, allocateVolume } from './market-data.js';
+import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
 let bars=[], zones=[], selected=-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
@@ -7,29 +8,8 @@ const fmt=(v,d=2)=>Number(v).toLocaleString('ru-RU',{minimumFractionDigits:d,max
 const timeLabel=(value,options={},method='toLocaleString')=>{const date=new Date(value);return Number.isNaN(date.getTime())?String(value):date[method]('en-GB',options);};
 const zonesWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+' зона';if(ones>=2&&ones<=4&&(tens<12||tens>14))return n+' зоны';return n+' зон';};
 const barsWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+' СВЕЧА';if(ones>=2&&ones<=4&&(tens<12||tens>14))return n+' СВЕЧИ';return n+' СВЕЧЕЙ';};
-const zoneStates={UNTESTED:'НЕ ПРОВЕРЕНА',SWEPT:'ПРОБИТА',TESTED:'ПРОВЕРЕНА',FLIPPED:'СМЕНА РОЛИ','AT PRICE':'У ЦЕНЫ','NEAR PRICE':'РЯДОМ'};
-const zoneStateText=state=>zoneStates[String(state||'').toUpperCase()]||'НАЙДЕНА';
-const zoneLabelRu={
- 'Role-flip level (highs + lows)':'Смена роли (максимумы и минимумы)',
- 'Repeated swing highs':'Повторный максимум','Repeated swing lows':'Повторный минимум',
- 'Swing high':'Максимум свинга','Swing low':'Минимум свинга',
- 'Range high':'Максимум диапазона','Range low':'Минимум диапазона',
- 'Volume node':'Узел объёма','Round number':'Круглый уровень',
- 'Prior day high':'Максимум прошлого дня','Prior day low':'Минимум прошлого дня',
- 'Two days ago high':'Максимум позавчерашнего дня','Two days ago low':'Минимум позавчерашнего дня',
- 'Asia high':'Максимум азиатской сессии','Asia low':'Минимум азиатской сессии',
- 'London high':'Максимум лондонской сессии','London low':'Минимум лондонской сессии',
- 'New York high':'Максимум нью-йоркской сессии','New York low':'Минимум нью-йоркской сессии',
- 'Weekly open':'Открытие недели','Prior week high':'Максимум прошлой недели','Prior week low':'Минимум прошлой недели',
- 'H4 swing high':'Свинг H4 · максимум','H4 swing low':'Свинг H4 · минимум',
- 'H1 swing high':'Свинг H1 · максимум','H1 swing low':'Свинг H1 · минимум',
- 'Volume POC':'Узел объёма (POC)','Value area high':'Верх зоны стоимости','Value area low':'Низ зоны стоимости'
-};
-function zoneLabelText(label){
- const text=String(label||'Уровень'),flipped=text.endsWith(' · role flip'),base=flipped?text.slice(0,-' · role flip'.length):text;
- const translated=zoneLabelRu[base]||base.replace(/^(\d+)-bar high$/,'Максимум $1 свечей').replace(/^(\d+)-bar low$/,'Минимум $1 свечей');
- return flipped?translated+' · смена роли':translated;
-}
+const zoneStateText=state=>zoneStateRu(state);
+const zoneLabelText=label=>zoneLabelRu(label);
 function notify(s){toast.textContent=s;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2100);}
 function currentLevels(){if(!live)return levels;const start=Math.max(0,Math.min(Math.max(0,bars.length-24),selected-12)),subset=bars.slice(start,start+24),set=new Set();for(const b of subset)for(const l of b.levels||[])set.add(Number(l.price));return [...set].sort((a,b)=>b-a).slice(0,32);}
 function setEmptyState(empty){if(chartEmpty)chartEmpty.hidden=!empty;}

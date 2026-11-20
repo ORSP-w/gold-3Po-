@@ -59,6 +59,9 @@ try {
   assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day broker history');
   assert.equal(await page.locator('#chartEmpty').isHidden(), true, 'empty state must disappear once broker data arrives');
   assert.ok(await page.locator('.zone-row').count() > 0, 'liquidity zones should appear once broker history arrives');
+  const zoneText = await page.locator('#zoneList').innerText();
+  assert.ok(/[А-Яа-яЁё]/.test(zoneText), 'zone rows must be captioned in Russian, not engine tokens');
+  assert.ok(!/Swing high|Prior day|Value area|UNTESTED|TESTED|SWEPT/.test(zoneText), 'no English label or state may reach the panel');
 
   await page.locator('.zone-row').first().click();
   assert.equal(await page.locator('.zone-row.selected').count(), 1, 'zone click should select one zone');

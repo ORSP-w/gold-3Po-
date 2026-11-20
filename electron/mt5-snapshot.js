@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { randomBytes } from 'node:crypto';
+import { zoneLabelRu, zoneStateRu } from '../zone-labels.js';
 
 export function snapshotPath(commonDataPath, symbol) {
   if (!path.isAbsolute(commonDataPath) || !/^(?:XAUUSD|GOLD)[A-Z0-9._#+-]{0,20}$/i.test(symbol) || symbol.includes('..')) {
@@ -25,14 +26,19 @@ export function normalizeStyle(style = {}) {
   };
 }
 
-const labelText = value => String(value ?? '').replace(/·/g, '-').replace(/[^A-Za-z0-9 .+()\-]/g, '').replace(/\s+/g, ' ').trim().slice(0, 48) || 'Zone';
+const labelText = value => String(value ?? '')
+  .replace(/[·•]/g, '-')
+  .replace(/[,"|\\]/g, ' ')                 // the snapshot is comma-separated; bars split the tooltip
+  .replace(/[\u0000-\u001F\u007F]/g, ' ')   // the indicator rejects control characters
+  .replace(/\s+/g, ' ').trim().slice(0, 48) || 'Zone';
 
-// G3P2 snapshot: header, one STYLE line, one row per zone, END. The indicator rejects anything else.
+// The MT5 chart must read like the panel, so labels and states are localized before the
+// snapshot is written (zone-labels.js is shared with the workspace UI).
 export function encodeSnapshot(symbol, zones, now = Date.now(), style = DEFAULT_STYLE) {
   const st = normalizeStyle(style);
   const rows = zones.filter(z => /^[A-Za-z0-9._-]{1,40}$/.test(z.id) && ['buy', 'sell'].includes(z.side)
     && [z.low, z.high, z.strength].every(Number.isFinite) && z.low > 0 && z.high > z.low && z.strength >= 0 && z.strength <= 1)
-    .slice(0, 20).map(z => [z.id, `${z.side}-side`, z.low, z.high, z.strength, (String(z.state ?? '').toUpperCase().replace(/[^A-Z _-]/g, '').trim().slice(0, 32)) || 'UNTESTED', labelText(z.label)].join(','));
+    .slice(0, 20).map(z => [z.id, `${z.side}-side`, z.low, z.high, z.strength, labelText(zoneStateRu(z.state)), labelText(zoneLabelRu(z.label))].join(','));
   const styleLine = ['STYLE', st.buyColor, st.sellColor, st.lineStyle.toUpperCase(), st.lineWidth, st.fill ? 1 : 0, st.showLabels ? 1 : 0, st.showStrength ? 1 : 0].join(',');
   return [`G3P2,${Math.floor(now / 1000)},${symbol},${rows.length}`, styleLine, ...rows, 'END', ''].join('\r\n');
 }
