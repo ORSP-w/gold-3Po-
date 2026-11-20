@@ -79,6 +79,29 @@ try {
   assert.ok(await page.locator('.foot-cell').first().innerText().then(v => v.trim()).then(v => v === ''), 'number toggle should hide cell values');
   await page.locator('#numbersToggle').click();
 
+  // Footprint math: POC, value area, session profile, delta row and the markers are on screen.
+  assert.ok(await page.locator('.foot-poc').count() > 0, 'every drawn bar must mark its point of control');
+  assert.ok(await page.locator('.foot-cell.foot-va').count() > 0, 'the value area must be shaded');
+  assert.ok(await page.locator('.foot-profile:not(.empty)').count() > 0, 'the session profile column must carry volume');
+  assert.equal(await page.locator('.foot-profile b').count() > 0, true, 'the profile labels VAH / VAL / POC');
+  assert.equal(await page.locator('.foot-delta').count(), await page.locator('.bar-head').count(), 'one delta cell per bar');
+  assert.equal(await page.locator('.foot-cell.foot-forming').count() > 0, true, 'the forming bar is marked');
+  assert.ok(!/Swing high|Prior day|Value area/.test(await page.locator('#footprintGrid').innerText()), 'no engine token leaks into the footprint');
+
+  // Real time: a streamed tick lands in the forming bar between refetches, without a reload.
+  // The price is outside the fixture range, so a new price row proves the tick was applied.
+  const formingVolume = () => page.evaluate(() => [...document.querySelectorAll('.foot-cell.foot-forming')]
+    .reduce((sum, cell) => sum + cell.innerText.split(/\s+/).reduce((n, part) => n + (Number(part) || 0), 0), 0));
+  const beforeTick = await formingVolume();
+  // Same 15m bucket as the last streamed tick above, so no new candle is created.
+  const liveTick = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date().toISOString(), sequence: Date.now(), bid: 2649.1, ask: 2649.3, last: 2649.2, tickVolume: 9, realVolume: 0, flags: 32 };
+  const liveResponse = await fetch(base + '/v1/ingest/mt5/tick', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify(liveTick) });
+  assert.equal(liveResponse.status, 202, 'a live tick must be accepted');
+  await page.waitForFunction(before => [...document.querySelectorAll('.foot-cell.foot-forming')]
+    .reduce((sum, cell) => sum + cell.innerText.split(/\s+/).reduce((n, part) => n + (Number(part) || 0), 0), 0) > before, beforeTick, { timeout: 5000 });
+  assert.ok(await formingVolume() >= beforeTick + 9, 'the forming bar must absorb the tick volume immediately');
+  assert.ok(await page.locator('.foot-cell.foot-forming').count() > 0, 'the forming column survives the tick');
+
   const firstCell = page.locator('.foot-cell').first();
   const firstIndex = Number(await firstCell.getAttribute('data-index'));
   await firstCell.click();
@@ -212,7 +235,7 @@ try {
   assert.ok(wide.chart >= wide.wrap * 0.85, 'chart must fill the panel on wide screens');
   await page.screenshot({ path:'artifacts/market-lab-4k.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
-  process.stdout.write('Browser checks passed: empty state, chart, footprint, zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
+  process.stdout.write('Browser checks passed: empty state, chart, footprint (POC, value area, profile, delta row, live tick), zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
 } finally {
   if (browser) await browser.close();
   server.kill('SIGTERM');

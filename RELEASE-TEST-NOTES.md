@@ -32,6 +32,18 @@ Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local 
 5. The chart now fills the panel at any window size, including 4K; the workspace widens above 1800 px instead of staying at 1680 px. Primary buttons use the gold C-3PO accent in both themes.
 6. Every source has its own switch in **Зоны → Источники уровней**. Turning one off removes its levels from the search and from the confluence count; switches are validated server-side (`useVolume must be a boolean`), so a malformed request is rejected instead of silently ignored. Swing pivots always stay as the base.
 
+## Footprint: what the numbers mean (v0.8.0)
+
+1. Every price row comes from real ticks: `footprint-engine.js` buckets each tick by price step and by the side of the aggressor. A row that never traded stays empty; nothing is invented. A tick whose side the broker did not report is kept in a separate «без стороны» column and never guessed.
+2. **POC** is the price with the most volume in the bar. The **value area** is the 70% of the bar's volume traded around that POC — the same definition TradingView's volume footprint and Quantower's cluster chart publish. The share is a setting (50–95%).
+3. **Imbalance** is diagonal, not horizontal: ask volume at a price against bid volume one level below (a buy imbalance), and the mirror for a sell imbalance. A level counts when the bigger side is at least 300% of the smaller one — the industry default — and the threshold is a setting (150–500%). Three or more imbalanced levels in a row form a **stacked imbalance**.
+4. **Absorption** marks an outer row that carried at least twice the median row volume while the bar closed back inside: a passive order soaking up the aggression. **Unfinished auction** marks a bar extreme where both sides still printed — the auction never closed there.
+5. The right-hand column is the **session volume profile** with its own VAH / VAL / POC. A POC that later price never traded back through is listed as «голый POC»: these levels tend to act as magnets.
+6. **Cumulative delta against price** is checked over the last 20 bars. Price rising while cumulative delta falls (or the mirror) is flagged as a divergence in the inspector instead of being hidden inside a number.
+7. The footprint is live: a streamed tick updates the forming bar within a frame, so the last column moves between the 1.5 s refetches. The authoritative analysis still replaces the whole history regularly, so a dropped tick can never leave a permanent error.
+
+These are readings of executed volume from your broker, not a forecast, not a DOM and not exchange order flow. On broker OTC quotes the tick volume is activity, not contracts — the engine only labels a side when MT5 reports an aggressor flag.
+
 ## Activate the licence
 
 1. On first launch an activation screen covers the workspace and shows this computer's **Machine ID** (Copy button).

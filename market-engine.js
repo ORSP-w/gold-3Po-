@@ -1,5 +1,6 @@
 import { measureZoneReactions } from './zone-reaction.js';
 import { collectSourceLevels } from './zone-sources.js';
+import { applyTickToBar, footprintOf, sessionProfile, cumulativeDivergence, tickVolume, emptyBar } from './footprint-engine.js';
 const finite = n => Number.isFinite(n);
 const floorTime = (ms, interval) => Math.floor(ms / interval) * interval;
 // One place for the strength formula: shape (touches, pivot reaction), measured reaction, confluence, recency, volume, freshness, distance.
@@ -16,51 +17,31 @@ export function normalizeTick(input) {
   }
   if (!finite(input.bid) || !finite(input.ask) || input.bid <= 0 || input.ask < input.bid) throw new TypeError('Invalid tick quote');
   const last = finite(input.last) && input.last > 0 ? input.last : (input.bid + input.ask) / 2;
-  const volume = direction !== 'unknown' ? (finite(input.realVolume) && input.realVolume > 0 ? input.realVolume : finite(input.tickVolume) && input.tickVolume > 0 ? input.tickVolume : 1) : 1;
-  return { timestamp:new Date(time).toISOString(), time, bid:input.bid, ask:input.ask, last, volume, direction, source, symbol:String(input.symbol||'XAUUSD').toUpperCase(), type:'quote' };
+  return { timestamp:new Date(time).toISOString(), time, bid:input.bid, ask:input.ask, last, volume:tickVolume({ ...input, direction }), direction, source, symbol:String(input.symbol||'XAUUSD').toUpperCase(), type:'quote' };
 }
 
-export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000, maxZones, zoneOptions = {} } = {}) {
+export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceStep = 0.1, limit = 10000, maxZones, zoneOptions = {}, footprintOptions = {} } = {}) {
   if (!Array.isArray(events) || !finite(intervalMs) || intervalMs <= 0 || !finite(priceStep) || priceStep <= 0) throw new TypeError('Invalid analysis input');
   const ticks = events.map(e => normalizeTick(e)).sort((a,b) => a.time-b.time).slice(-1000000);
   const bars = new Map();
   for (const t of ticks) {
     const start = floorTime(t.time, intervalMs);
     let bar = bars.get(start);
-    if (!bar) { bar = { time: new Date(start).toISOString(), timeMs: start, o:t.last, h:t.last, l:t.last, c:t.last, tickCount:0, volume:0, bid:0, ask:0, unknown:0, levels:new Map() }; bars.set(start,bar); }
-    bar.h = Math.max(bar.h,t.last); bar.l = Math.min(bar.l,t.last); bar.c=t.last; bar.tickCount++; bar.volume += t.volume;
-    const levelPrice = Math.round(t.last / priceStep) * priceStep;
-    const key = levelPrice.toFixed(8);
-    let level = bar.levels.get(key);
-    if (!level) { level={price:levelPrice,bid:0,ask:0,unknown:0}; bar.levels.set(key,level); }
-    if (t.direction === 'buy') { level.ask += t.volume; bar.ask += t.volume; }
-    else if (t.direction === 'sell') { level.bid += t.volume; bar.bid += t.volume; }
-    else { level.unknown += t.volume; bar.unknown += t.volume; }
+    // The same builder the browser uses for the forming bar, so live and historical bars agree.
+    if (!bar) { bar = { ...emptyBar(start, t.last), time: new Date(start).toISOString() }; bars.set(start, bar); }
+    applyTickToBar(bar, t, priceStep);
   }
   let cumulativeDelta = 0;
   const result = [...bars.values()].slice(-Math.max(1,limit)).map((bar, barIndex, allBars) => {
-    const levels=[...bar.levels.values()].sort((a,b)=>b.price-a.price);
     const total=bar.bid+bar.ask+bar.unknown;
     const delta=bar.ask-bar.bid;
-    const imbalances=[];
-    for(let i=0;i<levels.length-1;i++){
-      const a=levels[i], b=levels[i+1];
-      const askRatio=a.ask/Math.max(1,b.bid), bidRatio=b.bid/Math.max(1,a.ask);
-      if(a.ask>=3 && askRatio>=3) imbalances.push({side:'buy',price:a.price,ratio:Number(askRatio.toFixed(2))});
-      if(b.bid>=3 && bidRatio>=3) imbalances.push({side:'sell',price:b.price,ratio:Number(bidRatio.toFixed(2))});
-    }
     cumulativeDelta += delta;
-    const stacked = [];
-    for (const side of ['buy','sell']) {
-      let run=[];
-      for (let j=0;j<levels.length;j++) {
-        const level=levels[j], adjacent=side==='buy'?levels[j+1]:levels[j-1];
-        const ratio=side==='buy'?level.ask/Math.max(1,adjacent?.bid||0):level.bid/Math.max(1,adjacent?.ask||0);
-        const active=side==='buy'?level.ask>=3&&ratio>=3:level.bid>=3&&ratio>=3;
-        if(active) run.push(level.price); else { if(run.length>=3) stacked.push({side,prices:run}); run=[]; }
-      }
-      if(run.length>=3) stacked.push({side,prices:run});
-    }
+    // POC, value area, diagonal imbalance, stacked imbalance, absorption and the unfinished
+    // auction all come from one module, shared with the live browser path.
+    const foot = footprintOf(bar.levels, { ...footprintOptions, h: bar.h, l: bar.l, c: bar.c });
+    const levels = foot.levels;
+    const imbalances = foot.imbalances;
+    const stacked = foot.stackedImbalances;
     const prior=allBars.slice(Math.max(0,barIndex-20),barIndex);
     const priorHigh=prior.length?Math.max(...prior.map(x=>x.h)):null,priorLow=prior.length?Math.min(...prior.map(x=>x.l)):null;
     const sweeps=[];
@@ -69,10 +50,13 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     const range=Math.max(0,bar.h-bar.l),body=Math.abs(bar.c-bar.o),directionalKnown=bar.unknown===0&&total>0;
     const absorption=directionalKnown&&total>=3&&range>0&&body/range<=0.25&&Math.abs(delta)/total<=0.2;
     const exhaustion=directionalKnown&&total>=3&&Math.abs(delta)/total>=0.7&&range<=priceStep*5;
-    return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,sweeps,absorption,exhaustion};
+    return {time:bar.time,timeMs:bar.timeMs,o:bar.o,h:bar.h,l:bar.l,c:bar.c,tickCount:bar.tickCount,volume:total,bid:bar.bid,ask:bar.ask,unknown:bar.unknown,delta,cumulativeDelta,levels,imbalances,stackedImbalances:stacked,
+      poc:foot.poc,valueArea:foot.valueArea,deltaRatio:foot.deltaRatio,absorbedLevels:foot.absorbedLevels,
+      unfinishedHigh:foot.unfinishedHigh,unfinishedLow:foot.unfinishedLow,maxLevelVolume:foot.maxLevelVolume,
+      sweeps,absorption,exhaustion};
   });
   const zones = detectLiquidityZones(result, priceStep, { ...zoneOptions, ...(maxZones === undefined ? {} : { maxZones }) });
-  return { bars:result, zones, tickCount:ticks.length, volumeKind:ticks.some(t=>t.source==='comex')?'exchange_trade_size':'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:ticks.length&&ticks.every(t=>t.source==='comex')?'licensed_vendor_aggressor_side; unknown_when_unavailable':'only_explicit_mt5_tick_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
+  return { bars:result, zones, profile:sessionProfile(result, { priceStep }), divergence:cumulativeDivergence(result), tickCount:ticks.length, volumeKind:ticks.some(t=>t.source==='comex')?'exchange_trade_size':'tick_activity_for_unknown_side; broker_reported_volume_only_with_explicit_aggressor', sideClassification:ticks.length&&ticks.every(t=>t.source==='comex')?'licensed_vendor_aggressor_side; unknown_when_unavailable':'only_explicit_mt5_tick_flags; otherwise_unknown', generatedAt:new Date().toISOString() };
 }
 
 export const DEFAULT_ZONE_OPTIONS = Object.freeze({

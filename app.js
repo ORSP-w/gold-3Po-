@@ -1,4 +1,5 @@
-import { barDelta, totalVolume, allocateVolume } from './market-data.js';
+import { barDelta, totalVolume } from './market-data.js';
+import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
@@ -41,21 +42,118 @@ function renderZones(){
  if(stats){const touches=zones.reduce((n,z)=>n+(z.reactions?.touches||0),0),kept=zones.reduce((n,z)=>n+(z.reactions?.respected||0),0);stats.textContent=touches?`История: ${kept} удержаний из ${touches} касаний · та же история, что и расчёт`:'Проверять пока нечего: в истории нет касаний этих уровней';}
  zoneList.querySelectorAll('button').forEach(n=>n.addEventListener('click',()=>{selectedZone=selectedZone===n.dataset.zone?null:n.dataset.zone;renderZones();renderChart();}));
 }
-function cell(b,p){if(Array.isArray(b.levels)){const v=b.levels.find(l=>Math.abs(l.price-p)<1e-7);return v?{bid:v.bid,ask:v.ask,unknown:v.unknown||0,imbalance:b.imbalances?.find(x=>Math.abs(x.price-p)<1e-7)?.side||null}:{bid:0,ask:0,unknown:0,imbalance:null};}const ri=levels.indexOf(p),ci=bars.indexOf(b),bw=levels.map((_,i)=>1+((i*7+ci*3)%5)),aw=levels.map((_,i)=>1+((i*5+ci*7+2)%5));return{bid:allocateVolume(b.bid,bw)[ri]||0,ask:allocateVolume(b.ask,aw)[ri]||0,unknown:0};}
+const near=(a,b,t=1e-6)=>Math.abs(Number(a)-Number(b))<t;
+// One row of one bar: real per-price volume only. A bar without a level map shows nothing
+// instead of an invented distribution.
+function levelOf(b,price){
+ if(!Array.isArray(b?.levels))return{bid:0,ask:0,unknown:0,total:0};
+ const v=b.levels.find(l=>near(l.price,price));
+ return v?{bid:v.bid||0,ask:v.ask||0,unknown:v.unknown||0,total:(v.bid||0)+(v.ask||0)+(v.unknown||0)}:{bid:0,ask:0,unknown:0,total:0};
+}
+function barFootprint(b){
+ if(b.poc!==undefined&&b.valueArea!==undefined&&Array.isArray(b.levels))return b;
+ if(!Array.isArray(b?.levels))return b;
+ return {...b,...footprintOf(b.levels,{h:b.h,l:b.l,c:b.c,priceStep:0.1})};
+}
 function renderFootprint(){
  if(!bars.length){grid.innerHTML='<div class="detail-caption">Тики брокера ещё не поступили. Подключите MT5, чтобы построить футпринт.</div>';return;}
- const windowSize=24,start=Math.max(0,Math.min(Math.max(0,bars.length-windowSize),selected-Math.floor(windowSize/2))),visible=bars.slice(start,start+windowSize),offset=start,priceRows=currentLevels();if(!priceRows.length){grid.innerHTML='<div class="detail-caption">Ожидание тиков брокера…</div>';return;}
- const cols=visible.length,template=`68px repeat(${cols},minmax(34px,1fr))`;
- const head=`<div class="foot-row foot-head" style="grid-template-columns:${template};min-width:${68+cols*37}px"><div class="price-level">ЦЕНА</div>${visible.map((b,i)=>`<div class="bar-head ${offset+i===selected?'active':''}">#${String(offset+i+1).padStart(3,'0')}</div>`).join('')}</div>`;
- const rows=priceRows.map(p=>`<div class="foot-row" style="grid-template-columns:${template};min-width:${68+cols*37}px"><div class="price-level">${fmt(p)}</div>${visible.map((b,i)=>{const v=cell(b,p),delta=v.ask-v.bid,total=v.ask+v.bid+v.unknown,intensity=Math.min(.72,.12+total/24);let content='',cls='';if(mode==='bidask'){content=`<span>${showNumbers?(v.unknown?'·':v.bid):''}</span><span>${showNumbers?(v.unknown?'·':v.ask):''}</span>`;cls='bidask';}if(mode==='delta'){content=showNumbers?(v.unknown?'·':(delta>0?'+':'')+delta):'';cls=delta>=0?'delta-positive':'delta-negative';}if(mode==='volume'){content=showNumbers?fmt(total,0):'';cls='volume-cell';}if(v.imbalance)cls+=' imbalance-'+v.imbalance;return `<button class="foot-cell ${cls} ${offset+i===selected?'active':''}" data-index="${offset+i}" style="--intensity:${intensity}" title="Бид ${v.bid}; аск ${v.ask}; без стороны ${v.unknown}" aria-label="Свеча ${offset+i+1}, цена ${fmt(p)}, бид ${v.bid}, аск ${v.ask}, без стороны ${v.unknown}">${content}</button>`;}).join('')}</div>`).join('');
- const times=`<div class="foot-row foot-times" style="grid-template-columns:${template};min-width:${68+cols*37}px"><div class="price-level">ВРЕМЯ</div>${visible.map((b,i)=>`<button class="bar-time ${offset+i===selected?'active':''}" data-index="${offset+i}">${timeLabel(b.time,{hour:'2-digit',minute:'2-digit',timeZone:'UTC'},'toLocaleTimeString')}</button>`).join('')}</div>`;
- grid.innerHTML=`<div class="footprint-table" style="min-width:${68+cols*37}px">${head}${rows}${times}</div>`;grid.querySelectorAll('[data-index]').forEach(n=>n.addEventListener('click',()=>select(Number(n.dataset.index))));
+ // Column count follows the panel width, so the session profile stays on screen instead of
+ // hiding behind a horizontal scrollbar.
+ const available=Math.max(320,(grid.clientWidth||900)-24),maxCols=Math.max(6,Math.min(60,Math.floor((available-68-92)/34)));
+ const windowSize=maxCols,start=Math.max(0,Math.min(Math.max(0,bars.length-windowSize),selected-Math.floor(windowSize/2))),visible=bars.slice(start,start+windowSize),offset=start;
+ // Only prices that actually traded are drawn: a row of zeros is not information.
+ const traded=new Map();
+ for(const b of visible)for(const row of (Array.isArray(b.levels)?b.levels:[])){
+  if(!(row.bid||row.ask||row.unknown))continue;
+  const key=Number(row.price).toFixed(2);
+  if(!traded.has(key))traded.set(key,{price:Number(row.price),total:0,volume:(b.volume||0)});
+  traded.get(key).total+=(row.bid||0)+(row.ask||0)+(row.unknown||0);
+ }
+ const priceRows=[...traded.values()].sort((a,b)=>b.price-a.price).map(item=>item.price);
+ if(!priceRows.length){grid.innerHTML='<div class="detail-caption">В выбранном окне нет сделок: футпринт появится с первыми тиками.</div>';return;}
+ const feet=visible.map(barFootprint);
+ // One scale for the whole panel: a colour means the same thing in every column.
+ const scale=Math.max(1,...feet.map(b=>Number(b.maxLevelVolume)||0));
+ const profile=sessionProfile(bars,{priceStep:0.1});
+ const currentProfile=profile.current;
+ const profileRows=new Map((currentProfile?.levels||[]).map(row=>[row.price.toFixed(2),row]));
+ const profileMax=Math.max(1,...(currentProfile?.levels||[]).map(row=>row.total));
+ const va=currentProfile?.valueArea||null;
+ const cols=visible.length,template=`68px repeat(${cols},minmax(30px,44px)) 92px`,minWidth=68+cols*30+92;
+ const head=`<div class="foot-row foot-head" style="grid-template-columns:${template};min-width:${minWidth}px"><div class="price-level">ЦЕНА</div>${visible.map((b,i)=>`<div class="bar-head ${offset+i===selected?'active':''}">#${String(offset+i+1).padStart(3,'0')}</div>`).join('')}<div class="foot-profile-head">ПРОФИЛЬ</div></div>`;
+ const rows=priceRows.map(p=>`<div class="foot-row" style="grid-template-columns:${template};min-width:${minWidth}px"><div class="price-level">${fmt(p)}</div>${feet.map((b,i)=>{
+  const v=levelOf(b,p),delta=v.ask-v.bid,total=v.total||(v.ask+v.bid+v.unknown);
+  const intensity=total>0?Math.min(.85,.07+.68*Math.pow(total/scale,.65)):0;
+  const isPoc=b.poc!=null&&near(b.poc,p),inVa=!!b.valueArea&&p<=b.valueArea.high+1e-9&&p>=b.valueArea.low-1e-9;
+  const imbalance=b.imbalances?.find(x=>near(x.price,p))?.side||null;
+  const absorbed=(b.absorbedLevels||[]).some(x=>near(x.price,p));
+  const levelRows=Array.isArray(b.levels)?b.levels:[];
+  const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
+  let content='',cls='';
+  if(mode==='bidask'){content=showNumbers&&total?`<span>${v.unknown&&!v.bid&&!v.ask?'·':v.bid}</span><span>${v.unknown&&!v.bid&&!v.ask?'·':v.ask}</span>`:'';cls='bidask';}
+  if(mode==='delta'){content=showNumbers?(total?((delta>0?'+':'')+delta):''):'';cls=delta>=0?'delta-positive':'delta-negative';}
+  if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
+  if(imbalance)cls+=' imbalance-'+imbalance;
+  if(isPoc)cls+=' foot-poc';
+  if(inVa)cls+=' foot-va';
+  if(absorbed)cls+=' foot-absorbed';
+  if(unfinished)cls+=' foot-unfinished';
+  if(offset+i===bars.length-1)cls+=' foot-forming';
+  const marks=[isPoc?'POC':'',inVa?'зона стоимости':'',imbalance?(imbalance==='buy'?'имбаланс покупателей':'имбаланс продавцов'):'',absorbed?'поглощение':'',unfinished?'незакрытый аукцион':''].filter(Boolean).join(' · ');
+  return `<button class="foot-cell ${cls} ${offset+i===selected?'active':''}" data-index="${offset+i}" style="--intensity:${intensity.toFixed(3)}" title="Бид ${v.bid}; аск ${v.ask}; без стороны ${v.unknown}${marks?' · '+marks:''}" aria-label="Свеча ${offset+i+1}, цена ${fmt(p)}, бид ${v.bid}, аск ${v.ask}, без стороны ${v.unknown}${marks?', '+marks:''}">${content}${isPoc?'<i class="poc-mark">◆</i>':''}</button>`;}).join('')}${(()=>{
+  const row=profileRows.get(Number(p).toFixed(2));
+  if(!row||!row.total)return '<div class="foot-profile empty"></div>';
+  const isPoc=va&&near(currentProfile.poc,p),inVa=va&&p<=va.high+1e-9&&p>=va.low-1e-9;
+  const isVah=va&&near(va.high,p),isVal=va&&near(va.low,p);
+  const width=Math.max(1,Math.round(100*row.total/profileMax));
+  return `<div class="foot-profile ${inVa?'va':''} ${isPoc?'poc':''}" title="Профиль сессии: ${fmt(row.total,0)} · ${isPoc?'POC':'внутри зоны стоимости'}"><i style="width:${width}%"></i>${isVah?'<b>VAH</b>':isVal?'<b>VAL</b>':isPoc?'<b>POC</b>':''}</div>`;
+ })()}</div>`).join('');
+ const deltas=`<div class="foot-row foot-deltas" style="grid-template-columns:${template};min-width:${minWidth}px"><div class="price-level">Δ СВЕЧИ</div>${feet.map((b,i)=>{const d=b.unknown>0?null:(b.delta??barDelta(b));return `<div class="foot-delta ${d===null?'':d>=0?'positive':'negative'} ${offset+i===selected?'active':''}">${d===null?'—':((d>0?'+':'')+fmt(d,0))}</div>`;}).join('')}<div class="foot-profile-total">${currentProfile?fmt(currentProfile.volume,0):'—'}</div></div>`;
+ const times=`<div class="foot-row foot-times" style="grid-template-columns:${template};min-width:${minWidth}px"><div class="price-level">ВРЕМЯ</div>${visible.map((b,i)=>`<button class="bar-time ${offset+i===selected?'active':''}" data-index="${offset+i}">${timeLabel(b.time,{hour:'2-digit',minute:'2-digit',timeZone:'UTC'},'toLocaleTimeString')}</button>`).join('')}<div class="foot-profile-head">СЕССИЯ</div></div>`;
+ grid.innerHTML=`<div class="footprint-table" style="min-width:${minWidth}px">${head}${deltas}${rows}${times}</div>`;
+ // Keep the latest price in view unless the trader scrolled the panel themselves.
+ if(grid.dataset.autoScroll!=='0'){
+  const target=grid.querySelector('.foot-cell.foot-forming.foot-poc')||[...grid.querySelectorAll('.foot-cell.foot-forming')].find(node=>node.textContent.trim());
+  if(target){const row=target.closest('.foot-row'),box=grid.getBoundingClientRect(),rect=row.getBoundingClientRect();
+   if(rect.top<box.top+50||rect.bottom>box.bottom-50)grid.scrollTop+=rect.top-box.top-Math.round((box.height-rect.height)/2);}
+ }
+ grid.querySelectorAll('[data-index]').forEach(n=>n.addEventListener('click',()=>select(Number(n.dataset.index))));
 }
+// A wheel or touch scroll means the trader took over the view; stop re-centring the price axis.
+for(const type of ['wheel','touchmove','pointerdown'])grid.addEventListener(type,()=>{grid.dataset.autoScroll='0';},{passive:true});
+$('#resetView')?.addEventListener('click',()=>{grid.dataset.autoScroll='1';});
 function renderInspector(){
- const clear=()=>{$('#selectedBar').textContent='—';$('#selectedDelta').textContent='— Δ';$('#selectedDelta').className='delta-chip';$('#bidVolume').textContent='—';$('#askVolume').textContent='—';$('#totalVolume').textContent='—';$('#imbalance').textContent='—';};
- const b=bars[selected];if(!b){clear();return;}
+ const clear=()=>{$('#selectedBar').textContent='—';$('#selectedDelta').textContent='— Δ';$('#selectedDelta').className='delta-chip';for(const id of ['bidVolume','askVolume','totalVolume','imbalance','pocPrice','valueAreaRange','absorbedInfo','unfinishedInfo']){const n=$('#'+id);if(n)n.textContent='—';}const v=$('#flowVerdict');if(v){v.className='flow-verdict';v.textContent='Выберите столбец футпринта: POC, зона стоимости и незакрытый аукцион считаются по тикам брокера.';}};
+ const raw=bars[selected];if(!raw){clear();return;}
+ const b=barFootprint(raw);
  const d=(b.unknown||0)>0?null:(b.delta??barDelta(b)),bid=b.bid||0,ask=b.ask||0;
- $('#selectedBar').textContent=`#${String(selected+1).padStart(3,'0')} · ${timeLabel(b.time,{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:'UTC'})}`;$('#selectedDelta').textContent=d===null?'— Δ':`${d>0?'+':''}${fmt(d,0)} Δ`;$('#selectedDelta').className=`delta-chip ${d===null?'':d>=0?'positive-bg':'negative-bg'}`;$('#bidVolume').textContent=fmt(bid,0);$('#askVolume').textContent=fmt(ask,0);$('#totalVolume').textContent=fmt(b.volume??totalVolume(b),0);$('#imbalance').textContent=bid&&ask?`${(Math.max(bid,ask)/Math.min(bid,ask)).toFixed(2)}×`:'—';
+ $('#selectedBar').textContent=`#${String(selected+1).padStart(3,'0')} · ${timeLabel(b.time,{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:'UTC'})}`;
+ $('#selectedDelta').textContent=d===null?'— Δ':`${d>0?'+':''}${fmt(d,0)} Δ`;
+ $('#selectedDelta').className=`delta-chip ${d===null?'':d>=0?'positive-bg':'negative-bg'}`;
+ $('#bidVolume').textContent=fmt(bid,0);
+ $('#askVolume').textContent=fmt(ask,0);
+ $('#totalVolume').textContent=fmt(b.volume??totalVolume(b),0);
+ $('#imbalance').textContent=bid&&ask?`${(Math.max(bid,ask)/Math.min(bid,ask)).toFixed(2)}×`:'—';
+ $('#pocPrice').textContent=b.poc!=null?fmt(b.poc):'—';
+ $('#valueAreaRange').textContent=b.valueArea?`${fmt(b.valueArea.low)} — ${fmt(b.valueArea.high)} · ${Math.round(b.valueArea.share*100)}%`:'—';
+ const absorbed=b.absorbedLevels||[];
+ $('#absorbedInfo').textContent=absorbed.length?absorbed.map(item=>`${fmt(item.price)} ×${item.multiple}`).join(' · '):'нет';
+ const open=[b.unfinishedHigh?'верх':null,b.unfinishedLow?'низ':null].filter(Boolean);
+ $('#unfinishedInfo').textContent=open.length?'не закрыт: '+open.join(' и '):'закрыт';
+ const divergence=analysisMeta?.divergence;
+ const verdict=$('#flowVerdict');
+ if(verdict){
+  const stacked=(b.stackedImbalances||[]).length;
+  const parts=[];
+  if(b.poc!=null)parts.push(`POC ${fmt(b.poc)}`);
+  if(b.valueArea)parts.push(`зона стоимости ${fmt(b.valueArea.low)}–${fmt(b.valueArea.high)}`);
+  parts.push(b.imbalances?.length?`имбалансов ${b.imbalances.length}${stacked?`, из них стеков ${stacked}`:''}`:'имбалансов нет');
+  parts.push(absorbed.length?`поглощение на ${absorbed.length===1?'уровне':absorbed.length+' уровнях'}`:'поглощения нет');
+  let text=`${parts.join(' · ')}.`;
+  if(divergence?.side)text+=divergence.side==='bearish'?' Цена растёт, кумулятивная дельта падает — покупатели не подтверждают движение.':' Цена падает, кумулятивная дельта растёт — продавцы не подтверждают движение.';
+  verdict.className=`flow-verdict ${divergence?.side?'is-'+divergence.side:''}`;
+  verdict.textContent=text;
+ }
 }
 function select(i){
  if(!Number.isInteger(i)||i<0||i>=bars.length){selected=-1;renderInspector();renderChart();renderFootprint();return;}
@@ -66,7 +164,42 @@ $('#numbersToggle').addEventListener('click',e=>{showNumbers=!showNumbers;e.curr
 $('#footprintModes').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;$('#footprintModes').querySelectorAll('button').forEach(x=>x.classList.toggle('selected',x===b));renderFootprint();}));
 $('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);notify('Вид сброшен');});
 $('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
-window.addEventListener('market-analysis',e=>{if(replayMode)return;const a=e.detail;if(!a?.bars?.length)return;const previousTime=bars[selected]?.time,wasAtLatest=selected===bars.length-1;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=wasAtLatest||selected<0?bars.length-1:Math.max(0,bars.findIndex(b=>b.time===previousTime));levels=currentLevels();const feedLive=a.feed?.status==='online';const status=$('#chartStatus');if(status){status.textContent=(feedLive?'ОНЛАЙН · ':'ИСТОРИЯ · ')+barsWord(bars.length);status.className=feedLive?'ok':'warning';}const signalSummary=$('#signalSummary');if(signalSummary){const sweeps=bars.reduce((n,b)=>n+(b.sweeps?.length||0),0),stacked=bars.reduce((n,b)=>n+(b.stackedImbalances?.length||0),0),absorption=bars.filter(b=>b.absorption).length,exhaustion=bars.filter(b=>b.exhaustion).length;signalSummary.textContent='СНЯТИЯ '+sweeps+' · НАКОПЛЕНИЯ '+stacked+' · ПОГЛОЩЕНИЕ '+absorption+' · ИСТОЩЕНИЕ '+exhaustion;}const tag=$('#dataMode');if(tag)tag.textContent=feedLive?'ROBOFOREX MT5 · ОНЛАЙН':'ROBOFOREX MT5 · ИСТОРИЯ';const range=$('#barCount');if(range)range.textContent=barsWord(bars.length);const windowNode=$('#sessionWindow');if(windowNode){const hh=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?'':String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');};windowNode.textContent=hh(bars[0].time)+' — '+hh(bars.at(-1).time);}renderZones();select(selected);});
+// A streamed tick updates the forming bar in place: the last footprint column and the last
+// candle move between authoritative refetches instead of waiting for the next 1.5 s poll.
+let liveFrame=0,liveRenderedAt=0;
+function scheduleLiveRender(){
+ if(liveFrame)return;
+ const wait=Math.max(0,250-(performance.now()-liveRenderedAt));
+ liveFrame=setTimeout(()=>{liveFrame=0;liveRenderedAt=performance.now();renderChart();renderFootprint();if(selected===bars.length-1)renderInspector();},wait);
+}
+function applyLiveTick(event){
+ if(replayMode||!bars.length||!event)return;
+ const time=Date.parse(event.timestamp),interval=Number(window.gold3poIntervalMs?.()||900000);
+ if(!Number.isFinite(time)||!(interval>0))return;
+ const start=Math.floor(time/interval)*interval;
+ const previous=bars.at(-1);
+ if(start<previous.timeMs)return; // a late tick for a closed bar: the next refetch is authoritative
+ if(start>previous.timeMs){
+  const fresh={...emptyBar(start,Number(event.last)),time:new Date(start).toISOString()};
+  fresh.levelMap=new Map();
+  bars.push(fresh);
+  if(selected===bars.length-2)selected=bars.length-1;
+ }else if(!bars.at(-1).levelMap&&Array.isArray(bars.at(-1).levels)){
+  bars.at(-1).levelMap=new Map(bars.at(-1).levels.map(row=>[Number(row.price).toFixed(8),{...row}]));
+ }
+ const bar=bars.at(-1);
+ const state={levels:bar.levelMap,o:bar.o,h:bar.h,l:bar.l,c:bar.c,volume:bar.volume||0,bid:bar.bid||0,ask:bar.ask||0,unknown:bar.unknown||0,tickCount:bar.tickCount||0};
+ applyTickToBar(state,{last:Number(event.last),volume:footprintTickVolume(event),aggressorSide:event.aggressorSide,flags:event.flags},0.1);
+ const foot=footprintOf(state.levels,{h:state.h,l:state.l,c:state.c});
+ bar.levelMap=state.levels;
+ Object.assign(bar,{o:state.o,h:state.h,l:state.l,c:state.c,volume:state.volume,bid:state.bid,ask:state.ask,unknown:state.unknown,tickCount:state.tickCount,
+  levels:foot.levels,delta:foot.delta,deltaRatio:foot.deltaRatio,poc:foot.poc,valueArea:foot.valueArea,imbalances:foot.imbalances,
+  stackedImbalances:foot.stackedImbalances,absorbedLevels:foot.absorbedLevels,unfinishedHigh:foot.unfinishedHigh,unfinishedLow:foot.unfinishedLow,maxLevelVolume:foot.maxLevelVolume});
+ bar.cumulativeDelta=(bars[bars.length-2]?.cumulativeDelta||0)+bar.delta;
+ scheduleLiveRender();
+}
+window.addEventListener('market-tick',e=>applyLiveTick(e.detail));
+window.addEventListener('market-analysis',e=>{if(replayMode)return;const a=e.detail;if(!a?.bars?.length)return;const previousTime=bars[selected]?.time,wasAtLatest=selected===bars.length-1;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=wasAtLatest||selected<0?bars.length-1:Math.max(0,bars.findIndex(b=>b.time===previousTime));levels=currentLevels();const feedLive=a.feed?.status==='online';const status=$('#chartStatus');if(status){status.textContent=(feedLive?'ОНЛАЙН · ':'ИСТОРИЯ · ')+barsWord(bars.length);status.className=feedLive?'ok':'warning';}const signalSummary=$('#signalSummary');if(signalSummary){const sweeps=bars.reduce((n,b)=>n+(b.sweeps?.length||0),0),stacked=bars.reduce((n,b)=>n+(b.stackedImbalances?.length||0),0),absorption=bars.filter(b=>b.absorption).length,exhaustion=bars.filter(b=>b.exhaustion).length,unfinished=bars.filter(b=>b.unfinishedHigh||b.unfinishedLow).length,absorbed=bars.reduce((n,b)=>n+((b.absorbedLevels||[]).length?1:0),0);const naked=a.profile?.naked?.length||0,div=a.divergence?.side;signalSummary.textContent='СНЯТИЯ '+sweeps+' · СТЕКИ '+stacked+' · ПОГЛОЩЕНИЕ УРОВНЕЙ '+absorbed+' · НЕЗАКРЫТЫЕ АУКЦИОНЫ '+unfinished+(naked?' · ГОЛЫХ POC '+naked:'')+(div?(div==='bearish'?' · ДИВЕРГЕНЦИЯ: МЕДВЕЖЬЯ':' · ДИВЕРГЕНЦИЯ: БЫЧЬЯ'):'');}const tag=$('#dataMode');if(tag)tag.textContent=feedLive?'ROBOFOREX MT5 · ОНЛАЙН':'ROBOFOREX MT5 · ИСТОРИЯ';const range=$('#barCount');if(range)range.textContent=barsWord(bars.length);const windowNode=$('#sessionWindow');if(windowNode){const hh=v=>{const d=new Date(v);return Number.isNaN(d.getTime())?'':String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');};windowNode.textContent=hh(bars[0].time)+' — '+hh(bars.at(-1).time);}renderZones();select(selected);});
 window.addEventListener('market-replay',e=>{
  const a=e.detail;if(!a?.bars?.length)return;
  replayMode=true;bars=a.bars;live=true;analysisMeta=a;zones=a.zones||[];selected=0;levels=currentLevels();hasAutoScrolled=false;

@@ -2,6 +2,7 @@
 // Every change is saved to /v1/settings right away; the MT5 indicator picks it up on its next refresh.
 const $ = id => document.getElementById(id);
 const DEFAULTS = { zones: { minZones: 3, maxZones: 7, pivotWidth: 2, atrPeriod: 14, clusterAtr: 0.35, zoneWidthAtr: 0.15, maxDistanceAtr: 15, reactionBars: 6, timeframeMinutes: 15, usePriorDay: true, useSessions: true, useWeek: true, useHigherTf: true, useVolume: true },
+  footprint: { imbalanceRatio: 3, imbalanceLevels: 3, minLevelVolume: 3, valueAreaShare: 0.7, absorptionMultiple: 2 },
   mt5: { buyColor: '#FF0000', sellColor: '#FF0000', lineStyle: 'solid', lineWidth: 2, fill: false, showLabels: true, showStrength: true }, ui: { theme: 'glass-dark' } };
 const SWATCHES = ['#FF0000', '#FF4D4D', '#FF8800', '#FFC799', '#FFD60A', '#30D158', '#0A84FF', '#BF5AF2', '#FFFFFF'];
 const TF_LABEL = { 5: '5m', 15: '15m', 30: '30m', 60: '1h', 240: '4h' };
@@ -45,6 +46,11 @@ function render() {
   $('maxDistanceAtrValue') && ($('maxDistanceAtrValue').textContent = `${z.maxDistanceAtr} ATR от цены`);
   $('atrPeriodValue') && ($('atrPeriodValue').textContent = String(z.atrPeriod));
   $('reactionBarsValue') && ($('reactionBarsValue').textContent = `${z.reactionBars} бар${z.reactionBars === 1 ? '' : z.reactionBars < 5 ? 'а' : 'ов'}`);
+  const f = settings.footprint;
+  set('setImbalanceRatio', f.imbalanceRatio); set('setValueAreaShare', Math.round(f.valueAreaShare * 100)); set('setAbsorptionMultiple', f.absorptionMultiple);
+  $('imbalanceRatioValue') && ($('imbalanceRatioValue').textContent = `${Math.round(f.imbalanceRatio * 100)}%`);
+  $('valueAreaShareValue') && ($('valueAreaShareValue').textContent = `${Math.round(f.valueAreaShare * 100)}%`);
+  $('absorptionMultipleValue') && ($('absorptionMultipleValue').textContent = `${Number(f.absorptionMultiple).toFixed(1)}× медианы`);
   setSeg('setTimeframe', z.timeframeMinutes);
   set('setBuyColor', m.buyColor.toLowerCase()); set('setSellColor', m.sellColor.toLowerCase());
   setSeg('setLineStyle', m.lineStyle);
@@ -115,6 +121,8 @@ function bind() {
   });
   const ranges = { setMinZones: 'minZones', setMaxZones: 'maxZones', setPivotWidth: 'pivotWidth', setClusterAtr: 'clusterAtr', setZoneWidthAtr: 'zoneWidthAtr', setMaxDistanceAtr: 'maxDistanceAtr', setAtrPeriod: 'atrPeriod', setReactionBars: 'reactionBars' };
   for (const [id, key] of Object.entries(ranges)) $(id)?.addEventListener('input', e => change('zones', key, Number(e.target.value)));
+  const footprintRanges = { setImbalanceRatio: ['imbalanceRatio', Number], setAbsorptionMultiple: ['absorptionMultiple', Number], setValueAreaShare: ['valueAreaShare', v => Number(v) / 100] };
+  for (const [id, [key, cast]] of Object.entries(footprintRanges)) $(id)?.addEventListener('input', e => change('footprint', key, cast(e.target.value)));
   $('setLineWidth')?.addEventListener('input', e => change('mt5', 'lineWidth', Number(e.target.value)));
   $('setBuyColor')?.addEventListener('input', e => change('mt5', 'buyColor', e.target.value.toUpperCase()));
   $('setSellColor')?.addEventListener('input', e => change('mt5', 'sellColor', e.target.value.toUpperCase()));

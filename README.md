@@ -4,7 +4,7 @@ GOLD-3Po is a read-only, **gold-only** market-structure research workspace (XAUU
 
 ## Implemented parts
 
-1. **Liquidity & Footprint workspace:** interactive OHLC chart, 3–7 ATR-based reaction zones (swing clusters with role flips, ranked by touches, reaction, recency, volume and distance), Bid × Ask / Delta / Volume footprint modes, bar inspector, selection and reset.
+1. **Liquidity & Footprint workspace:** interactive OHLC chart, 3–7 ATR-based reaction zones (swing clusters with role flips, ranked by touches, reaction, recency, volume and distance), Bid × Ask / Delta / Volume footprint modes with per-bar POC and 70% value area, diagonal 300% imbalances, stacked imbalances, absorption, unfinished auctions, the session volume profile (VAH/VAL/POC, naked POC) and a live forming bar, bar inspector, selection and reset.
 2. **Market data transport:** authenticated MT5 tick and history ingestion, sequenced live batches, COMEX normalized trade contract, SSE, health checks and append-only JSONL persistence.
 3. **Market engine:** OHLC aggregation, price-level activity, Delta, Cumulative Delta, adjacent and stacked imbalance candidates, repeated liquidity pools, sweeps/reclaims, and conservative unknown-side handling.
 4. **Historical research:** date-range replay, bar-by-bar playback, a rules-based backtester, ATR stops, R-multiple targets, conservative stop-first handling when stop and target are touched in the same candle.

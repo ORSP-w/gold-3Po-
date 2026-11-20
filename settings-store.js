@@ -1,6 +1,7 @@
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { DEFAULT_ZONE_OPTIONS, validateZoneOptions } from './market-engine.js';
+import { DEFAULT_FOOTPRINT_OPTIONS, validateFootprintOptions } from './footprint-engine.js';
 
 // App preferences: how zones are found and how the MT5 indicator draws them.
 // Kept apart from setups (which are versioned research conditions) so a colour change never creates a setup version.
@@ -10,6 +11,7 @@ export const TIMEFRAMES = [5, 15, 30, 60, 240];
 
 export const DEFAULT_SETTINGS = Object.freeze({
   zones: { ...DEFAULT_ZONE_OPTIONS, timeframeMinutes: 15 },
+  footprint: { ...DEFAULT_FOOTPRINT_OPTIONS },
   mt5: {
     buyColor: '#FF0000',   // zones above price (resistance / buy-side liquidity)
     sellColor: '#FF0000',  // zones below price (support / sell-side liquidity)
@@ -34,7 +36,10 @@ function section(name, input, defaults) {
 
 export function validateSettings(input = {}, base = DEFAULT_SETTINGS) {
   if (typeof input !== 'object' || input === null || Array.isArray(input)) throw new TypeError('Settings must be an object');
-  for (const key of Object.keys(input)) if (!['zones', 'mt5', 'ui'].includes(key)) throw new TypeError(`Unknown settings section: ${key}`);
+  for (const key of Object.keys(input)) if (!['zones', 'footprint', 'mt5', 'ui'].includes(key)) throw new TypeError(`Unknown settings section: ${key}`);
+
+  const f = section('footprint', input.footprint, base.footprint);
+  const footprint = validateFootprintOptions(f);
 
   const z = section('zones', input.zones, base.zones);
   const { timeframeMinutes, ...zoneOptions } = z;
@@ -57,7 +62,7 @@ export function validateSettings(input = {}, base = DEFAULT_SETTINGS) {
 
   const u = section('ui', input.ui, base.ui);
   if (!['glass-dark', 'glass-light'].includes(u.theme)) throw new TypeError('theme must be glass-dark or glass-light');
-  return { zones, mt5, ui: { theme: u.theme } };
+  return { zones, footprint, mt5, ui: { theme: u.theme } };
 }
 
 export function createSettingsStore({ file = './data/settings.json' } = {}) {
@@ -89,7 +94,7 @@ export function createSettingsStore({ file = './data/settings.json' } = {}) {
       if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) throw new TypeError('Settings must be an object');
       const merged = {};
       for (const key of Object.keys(patch)) {
-        if (!['zones', 'mt5', 'ui'].includes(key)) throw new TypeError(`Unknown settings section: ${key}`);
+        if (!['zones', 'footprint', 'mt5', 'ui'].includes(key)) throw new TypeError(`Unknown settings section: ${key}`);
         if (typeof patch[key] !== 'object' || patch[key] === null || Array.isArray(patch[key])) throw new TypeError(`${key} must be an object`);
         merged[key] = { ...state[key], ...patch[key] };
       }

@@ -51,6 +51,21 @@ test('zone sources and measurement windows persist, so the switches reach the en
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('footprint thresholds persist and reach the engine', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'g3p-settings-'));
+  try {
+    const file = join(dir, 'settings.json');
+    await createSettingsStore({ file }).update({ footprint: { imbalanceRatio: 2, valueAreaShare: 0.8 } });
+    const saved = (await createSettingsStore({ file }).get()).footprint;
+    assert.equal(saved.imbalanceRatio, 2);
+    assert.equal(saved.valueAreaShare, 0.8);
+    assert.equal(saved.imbalanceLevels, 3, 'untouched footprint keys keep their default');
+    assert.equal(saved.minLevelVolume, 3);
+    const onDisk = JSON.parse(await readFile(file, 'utf8')).footprint;
+    assert.equal(onDisk.imbalanceRatio, 2, 'the ratio is written, not only returned');
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('invalid settings are rejected', () => {
   assert.throws(() => validateSettings({ mt5: { lineWidth: 9 } }), /lineWidth/);
   assert.throws(() => validateSettings({ mt5: { lineStyle: 'wavy' } }), /lineStyle/);
@@ -60,4 +75,6 @@ test('invalid settings are rejected', () => {
   assert.throws(() => validateSettings({ zones: { atrPeriod: 1 } }), /atrPeriod/);
   assert.throws(() => validateSettings({ zones: { reactionBars: 0 } }), /reactionBars/);
   assert.throws(() => validateSettings({ zones: { useVolume: 'да' } }), /useVolume/);
+  assert.throws(() => validateSettings({ footprint: { imbalanceRatio: 1 } }), /imbalanceRatio/);
+  assert.throws(() => validateSettings({ footprint: { valueAreaShare: 1.2 } }), /valueAreaShare/);
 });

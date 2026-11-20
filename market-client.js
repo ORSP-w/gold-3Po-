@@ -37,7 +37,9 @@ async function refreshHealth(){
 function connectStream(){
  if(!('EventSource'in window)){paint(api,'SSE НЕ ПОДДЕРЖИВАЕТСЯ','error');return;}
  source=new EventSource('/v1/stream');source.onopen=()=>{refreshHealth();scheduleAnalysis();};source.onerror=()=>{paint(api,'ПЕРЕПОДКЛЮЧЕНИЕ','warning');reconnect();};
- source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target&&!message.historical)paint(target,'ОНЛАЙН · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol===marketSymbol())scheduleAnalysis();}catch{/* повреждённый кадр игнорируется: опрос /health остаётся источником истины */}});
+ source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target&&!message.historical)paint(target,'ОНЛАЙН · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol===marketSymbol()){scheduleAnalysis();
+   // The forming bar is updated from the tick itself, so the footprint moves between refetches.
+   if(!message.historical)window.dispatchEvent(new CustomEvent('market-tick',{detail:message}));}}catch{/* повреждённый кадр игнорируется: опрос /health остаётся источником истины */}});
 }
 // EventSource reconnects on its own, but a closed stream or a stalled API never recovers without this.
 function reconnect(){
