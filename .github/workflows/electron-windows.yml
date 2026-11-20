@@ -132,7 +132,7 @@ jobs:
           if (-not (Test-Path -LiteralPath $connector)) {
             throw "The packaged MT5 connector is missing: $connector"
           }
-          $probe = '{""id"":1,""op"":""ping""}' | & $connector 2>&1
+          $probe = '{"id":1,"op":"ping"}' | & $connector 2>&1
           if ($probe -notmatch '"ok":false' -or $probe -notmatch 'unknown_operation') {
             throw ("The packaged MT5 connector did not answer: " + $probe)
           }
