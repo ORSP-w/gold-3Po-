@@ -1,6 +1,7 @@
 import { marketSymbol } from './mt5-client.js';
 const api=document.querySelector('#apiStatus'),mt5=document.querySelector('#mt5Status'),comex=document.querySelector('#comexStatus');
-const labels={mt5,comex};let source;let analysisTimer=null;let lastAnalysisAt=0;
+const labels={mt5,comex};let source;let analysisTimer=null;let lastAnalysisAt=0;let reconnectTimer=null;
+const STALE_MS=45000;
 const pill=document.querySelector('.demo-pill'),link=document.querySelector('.connection');
 const feedStates={online:'ОНЛАЙН',stale:'УСТАРЕЛ',offline:'ОФФЛАЙН',waiting:'ОЖИДАНИЕ'};
 const feedText=status=>feedStates[String(status||'').toLowerCase()]||String(status||'ОЖИДАНИЕ').toUpperCase();
@@ -35,9 +36,25 @@ async function refreshHealth(){
 }
 function connectStream(){
  if(!('EventSource'in window)){paint(api,'SSE НЕ ПОДДЕРЖИВАЕТСЯ','error');return;}
- source=new EventSource('/v1/stream');source.onopen=()=>{refreshHealth();scheduleAnalysis();};source.onerror=()=>paint(api,'ПЕРЕПОДКЛЮЧЕНИЕ','warning');
+ source=new EventSource('/v1/stream');source.onopen=()=>{refreshHealth();scheduleAnalysis();};source.onerror=()=>{paint(api,'ПЕРЕПОДКЛЮЧЕНИЕ','warning');reconnect();};
  source.addEventListener('market',event=>{try{const message=JSON.parse(event.data);const target=labels[message.source];if(target&&!message.historical)paint(target,'ОНЛАЙН · '+ageLabel(Date.now()-Date.parse(message.receivedAt)),'online');if(message.source==='mt5'&&message.symbol===marketSymbol())scheduleAnalysis();}catch{/* повреждённый кадр игнорируется: опрос /health остаётся источником истины */}});
+}
+// EventSource reconnects on its own, but a closed stream or a stalled API never recovers without this.
+function reconnect(){
+ if(reconnectTimer)return;
+ reconnectTimer=window.setTimeout(()=>{reconnectTimer=null;try{source?.close();}catch{}connectStream();},5000);
+}
+function watchdog(){
+ const age=Date.now()-lastAnalysisAt;
+ if(!lastAnalysisAt){scheduleAnalysis();return;}
+ if(age>STALE_MS){
+  // Data exists but stopped arriving: say so instead of showing a frozen chart as if it were live.
+  paint(mt5,'ДАННЫЕ УСТАРЕЛИ · '+Math.round(age/1000)+' с','warning');
+  lastAnalysisAt=0;
+  scheduleAnalysis();
+  if(!source||source.readyState===EventSource.CLOSED)reconnect();
+ }
 }
 window.addEventListener('mt5-symbol-change',()=>{lastAnalysisAt=0;refreshAnalysis();refreshHealth();});
 window.addEventListener('gold3po-settings',e=>{if(e.detail?.zonesChanged){lastAnalysisAt=0;refreshAnalysis();}});
-refreshHealth();refreshAnalysis();connectStream();window.setInterval(refreshHealth,5000);
+refreshHealth();refreshAnalysis();connectStream();window.setInterval(refreshHealth,5000);window.setInterval(watchdog,10000);

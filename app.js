@@ -9,20 +9,25 @@ const zonesWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+'
 const barsWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+' СВЕЧА';if(ones>=2&&ones<=4&&(tens<12||tens>14))return n+' СВЕЧИ';return n+' СВЕЧЕЙ';};
 const zoneStates={UNTESTED:'НЕ ПРОВЕРЕНА',SWEPT:'ПРОБИТА',TESTED:'ПРОВЕРЕНА',FLIPPED:'СМЕНА РОЛИ','AT PRICE':'У ЦЕНЫ','NEAR PRICE':'РЯДОМ'};
 const zoneStateText=state=>zoneStates[String(state||'').toUpperCase()]||'НАЙДЕНА';
+const zoneLabelRu={
+ 'Role-flip level (highs + lows)':'Смена роли (максимумы и минимумы)',
+ 'Repeated swing highs':'Повторный максимум','Repeated swing lows':'Повторный минимум',
+ 'Swing high':'Максимум свинга','Swing low':'Минимум свинга',
+ 'Range high':'Максимум диапазона','Range low':'Минимум диапазона',
+ 'Volume node':'Узел объёма','Round number':'Круглый уровень',
+ 'Prior day high':'Максимум прошлого дня','Prior day low':'Минимум прошлого дня',
+ 'Two days ago high':'Максимум позавчерашнего дня','Two days ago low':'Минимум позавчерашнего дня',
+ 'Asia high':'Максимум азиатской сессии','Asia low':'Минимум азиатской сессии',
+ 'London high':'Максимум лондонской сессии','London low':'Минимум лондонской сессии',
+ 'New York high':'Максимум нью-йоркской сессии','New York low':'Минимум нью-йоркской сессии',
+ 'Weekly open':'Открытие недели','Prior week high':'Максимум прошлой недели','Prior week low':'Минимум прошлой недели',
+ 'H4 swing high':'Свинг H4 · максимум','H4 swing low':'Свинг H4 · минимум',
+ 'H1 swing high':'Свинг H1 · максимум','H1 swing low':'Свинг H1 · минимум',
+ 'Volume POC':'Узел объёма (POC)','Value area high':'Верх зоны стоимости','Value area low':'Низ зоны стоимости'
+};
 function zoneLabelText(label){
  const text=String(label||'Уровень'),flipped=text.endsWith(' · role flip'),base=flipped?text.slice(0,-' · role flip'.length):text;
- const translated=base
-  .replace(/^Role-flip level \(highs \+ lows\)$/,'Смена роли (максимумы и минимумы)')
-  .replace(/^Repeated swing highs$/,'Повторный максимум')
-  .replace(/^Repeated swing lows$/,'Повторный минимум')
-  .replace(/^Swing high$/,'Максимум свинга')
-  .replace(/^Swing low$/,'Минимум свинга')
-  .replace(/^Range high$/,'Максимум диапазона')
-  .replace(/^Range low$/,'Минимум диапазона')
-  .replace(/^Volume node$/,'Узел объёма')
-  .replace(/^Round number$/,'Круглый уровень')
-  .replace(/^(\d+)-bar high$/,'Максимум $1 свечей')
-  .replace(/^(\d+)-bar low$/,'Минимум $1 свечей');
+ const translated=zoneLabelRu[base]||base.replace(/^(\d+)-bar high$/,'Максимум $1 свечей').replace(/^(\d+)-bar low$/,'Минимум $1 свечей');
  return flipped?translated+' · смена роли':translated;
 }
 function notify(s){toast.textContent=s;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2100);}
@@ -31,9 +36,13 @@ function setEmptyState(empty){if(chartEmpty)chartEmpty.hidden=!empty;}
 function renderChart(){
  if(!bars.length){chart.innerHTML='';chart.setAttribute('viewBox','0 0 1000 390');chart.style.width='100%';setEmptyState(true);return;}
  setEmptyState(false);
- const left=64, step=bars.length<=120?850/Math.max(1,bars.length):7, width=Math.max(850,bars.length*step), svgWidth=left+width+85;
+ const left=64;
+ // The chart fills the panel at any window width (up to 4K): the grid and zones span the full width.
+ const wrapWidth=Math.max(320,Math.round((chart.parentElement?.clientWidth||960)-16));
+ const width=Math.max(wrapWidth-left-85,bars.length*6);
+ const step=width/Math.max(1,bars.length), svgWidth=left+width+85;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length){setEmptyState(true);return;}
- const min=Math.min(...allPrices)-1,max=Math.max(...allPrices)+1,x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(2,Math.min(10,step*.62));
+ const min=Math.min(...allPrices)-1,max=Math.max(...allPrices)+1,x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(2,Math.min(26,step*.62));
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);
  let html=''; for(let p=Math.ceil(min/gridStep)*gridStep;p<=max;p+=gridStep)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,gridStep<1?2:gridStep<10?1:0)}</text>`;
  if(showZones)for(const z of zones){const top=y(z.high),h=Math.max(4,y(z.low)-y(z.high)),c=z.side==='buy'?'zone-buy':'zone-sell';html+=`<rect x="${left}" y="${top}" width="${width}" height="${h}" class="${c} ${selectedZone===z.id?'selected-zone':''}" opacity="${.08+z.strength*.2}"/><line x1="${left}" y1="${top}" x2="${left+width}" y2="${top}" class="${c}-edge"/>`;}
@@ -47,7 +56,9 @@ function renderZones(){
  const buyCount=zones.filter(z=>z.side==='buy').length,sellCount=zones.filter(z=>z.side==='sell').length;
  $('#zoneCount').textContent=String(zones.length).padStart(2,'0');$('#aboveZones').textContent=zonesWord(buyCount);$('#belowZones').textContent=zonesWord(sellCount);
  if(!zones.length){zoneList.innerHTML='<div class="zone-empty">Зон пока нет. Они появятся, когда загрузится история брокера.</div>';return;}
- zoneList.innerHTML=zones.map(z=>`<button class="zone-row ${selectedZone===z.id?'selected':''}" data-zone="${z.id}"><span class="zone-side-dot ${z.side}"></span><span class="zone-info"><strong>${zoneLabelText(z.label)}</strong><small>${fmt(z.low)} — ${fmt(z.high)}</small><span class="zone-meter"><i class="${z.side}" style="width:${z.strength*100}%"></i></span></span><span class="zone-right"><b>${z.distance||''}</b><small>${zoneStateText(z.state)}</small><small class="zone-reaction">${z.reactions?.touches?`реакция ${z.reactions.respected}/${z.reactions.touches}`:'касаний не было'}</small></span></button>`).join('');
+ zoneList.innerHTML=zones.map(z=>{const src=Array.isArray(z.sources)?z.sources.filter(Boolean):[];const reaction=z.reactions?.touches?`реакция ${z.reactions.respected}/${z.reactions.touches}`:'касаний не было';return `<button class="zone-row ${selectedZone===z.id?'selected':''}" data-zone="${z.id}" title="${src.map(zoneLabelText).join(', ')}"><span class="zone-side-dot ${z.side}"></span><span class="zone-info"><strong>${zoneLabelText(z.label)}</strong><small>${fmt(z.low)} — ${fmt(z.high)}</small><span class="zone-meter"><i class="${z.side}" style="width:${z.strength*100}%"></i></span></span><span class="zone-right"><b>${z.distance||''}</b><small>${zoneStateText(z.state)}</small><small class="zone-reaction">${reaction}${src.length?' · источников '+src.length:''}</small></span></button>`;}).join('');
+ const stats=$('#zoneStats');
+ if(stats){const touches=zones.reduce((n,z)=>n+(z.reactions?.touches||0),0),kept=zones.reduce((n,z)=>n+(z.reactions?.respected||0),0);stats.textContent=touches?`История: ${kept} удержаний из ${touches} касаний · та же история, что и расчёт`:'Проверять пока нечего: в истории нет касаний этих уровней';}
  zoneList.querySelectorAll('button').forEach(n=>n.addEventListener('click',()=>{selectedZone=selectedZone===n.dataset.zone?null:n.dataset.zone;renderZones();renderChart();}));
 }
 function cell(b,p){if(Array.isArray(b.levels)){const v=b.levels.find(l=>Math.abs(l.price-p)<1e-7);return v?{bid:v.bid,ask:v.ask,unknown:v.unknown||0,imbalance:b.imbalances?.find(x=>Math.abs(x.price-p)<1e-7)?.side||null}:{bid:0,ask:0,unknown:0,imbalance:null};}const ri=levels.indexOf(p),ci=bars.indexOf(b),bw=levels.map((_,i)=>1+((i*7+ci*3)%5)),aw=levels.map((_,i)=>1+((i*5+ci*7+2)%5));return{bid:allocateVolume(b.bid,bw)[ri]||0,ask:allocateVolume(b.ask,aw)[ri]||0,unknown:0};}
@@ -88,4 +99,6 @@ window.addEventListener('market-replay',e=>{
 window.addEventListener('market-replay-step',e=>{if(replayMode)select(Number(e.detail?.index));});
 window.addEventListener('exit-replay',()=>{replayMode=false;});
 const initialStatus=$('#chartStatus');if(initialStatus&&!live){initialStatus.textContent='ОЖИДАНИЕ ДАННЫХ · ПОДКЛЮЧИТЕ MT5';initialStatus.className='warning';}
+let resizeTimer=null;
+window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=window.setTimeout(()=>renderChart(),150);});
 renderZones();renderInspector();renderChart();renderFootprint();

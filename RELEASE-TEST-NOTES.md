@@ -23,10 +23,18 @@ The application bundles Electron and its Chromium runtime. A separate Node.js in
 
 Settings are stored in `%APPDATA%\GOLD-3Po Market Lab\settings.json`. The local market archive is stored in `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl`. The licence key and clock watermark are stored in `license.json` / `license-state.json` in the same folder. These files are outside the installation folder and are retained when the application is updated or uninstalled.
 
+## Zones and their evidence (v0.8.0)
+
+1. Zones are built from several independent sources in the same broker history: swing pivots, the previous completed day's high/low, the Asia / London / New York session extremes, the weekly open and previous week extremes, H1 and H4 swings aggregated from the same candles, the volume profile (POC, value-area edges) and round numbers.
+2. When several sources land inside one zone, its strength rises (the `confluence` factor). A zone row shows the reaction evidence, and hovering it lists the sources that agree.
+3. Reaction evidence is measured, not assumed: `zone-reaction.js` walks the history and counts, per zone, how many touches held (price moved 0.5 ATR away from the edge) versus closed through it (0.25 ATR). The panel footer sums this as «N удержаний из M касаний».
+4. That measurement uses the same history the zones were built from, so it is evidence about the past, not a forecast. It is not a calibrated probability and must not be read as one.
+5. The chart now fills the panel at any window size, including 4K; the workspace widens above 1800 px instead of staying at 1680 px. Primary buttons use the gold C-3PO accent in both themes.
+
 ## Activate the licence
 
 1. On first launch an activation screen covers the workspace and shows this computer's **Machine ID** (Copy button).
-2. Send the Machine ID to the vendor. The vendor issues a signed key: `node tools/make-key.js issue --days 30 --machine <ID>`.
+2. Send the Machine ID to the vendor. The vendor issues a signed key: `npm run license-ui` opens the one-window generator (paste the ID, choose the term and edition, copy the key or the ready customer text), or `node tools/make-key.js issue --days 30 --machine <ID>` from the command line. The generator refuses to issue when the private key does not match the public key embedded in the app, so a key can never be handed out that the customer's copy would reject.
 3. Paste the whole `GOLD1.…` key into the activation field and press **Activate licence**. No internet is used.
 4. The status panel shows `Лицензия · АКТИВНА · N дн.`. When the term expires the activation screen returns; ingest keeps recording data in the background.
 5. Rolling the system clock back more than 5 minutes (against the stored watermark or the MT5 feed time) blocks the licence with `CLOCK ROLLBACK` until the correct time is restored.

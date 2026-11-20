@@ -1,8 +1,9 @@
 import { measureZoneReactions } from './zone-reaction.js';
+import { collectSourceLevels } from './zone-sources.js';
 const finite = n => Number.isFinite(n);
 const floorTime = (ms, interval) => Math.floor(ms / interval) * interval;
-// One place for the strength formula: shape (touches, pivot reaction), measured reaction, recency, volume, freshness, distance.
-const scoreZone = factors => 0.20 * factors.touches + 0.20 * factors.reaction + 0.20 * factors.measured + 0.15 * factors.recency + 0.10 * factors.volume + 0.05 * factors.freshness + 0.10 * factors.proximity;
+// One place for the strength formula: shape (touches, pivot reaction), measured reaction, confluence, recency, volume, freshness, distance.
+const scoreZone = factors => 0.18 * factors.touches + 0.18 * factors.reaction + 0.20 * factors.measured + 0.12 * factors.confluence + 0.12 * factors.recency + 0.07 * factors.volume + 0.05 * factors.freshness + 0.08 * factors.proximity;
 
 export function normalizeTick(input) {
   const time = Date.parse(input.timestamp);
@@ -195,6 +196,29 @@ export function detectLiquidityZones(bars, priceStep = 0.1, options = {}) {
       label: highs && lows ? 'Role-flip level (highs + lows)' : highs ? (touches > 1 ? 'Repeated swing highs' : 'Swing high') : (touches > 1 ? 'Repeated swing lows' : 'Swing low') });
   }
 
+  // Confluence: levels several independent sources agree on outrank a bare swing shape.
+  const sources = collectSourceLevels(closed, { priceStep });
+  for (const z of candidates) {
+    const agreed = sources.filter(s => Math.abs(s.price - z.mid) <= Math.max(pad, tolerance * 1.5));
+    z.sources = [...new Set(agreed.map(s => s.label))].slice(0, 3);
+    z.factors.confluence = Math.min(1, agreed.length / 2);
+  }
+  for (const s of sources) {
+    if (candidates.some(z => Math.abs(z.mid - s.price) < Math.max(tolerance, pad * 2))) continue;
+    const distanceAtr = Math.abs(s.price - last) / atr;
+    if (distanceAtr > o.maxDistanceAtr) continue;
+    const index = Number.isInteger(s.index) ? s.index : closed.length - 1;
+    const factors = { touches: 0.25, reaction: s.weight, measured: 0.5, confluence: 0, recency: Math.exp(-((closed.length - 1 - index) / halfLife) * Math.LN2), volume: s.source === 'volume' ? 1 : 0.5, freshness: 1, proximity: 1 / (1 + distanceAtr / 6) };
+    candidates.push({ low: s.price - pad, high: s.price + pad, mid: s.price, type: s.price > last ? 'high' : 'low', state: 'UNTESTED', touches: 0, score: 0, factors, distanceAtr, formedIndex: index, reference: true, label: s.label, source: s.source, sources: [s.label] });
+  }
+
+  // Measure what price actually did at each level, then score: a zone's strength must be backed by evidence.
+  for (const z of candidates) {
+    z.reactions = measureZoneReactions(closed, z, { atr });
+    z.factors.measured = z.reactions.rate;
+    z.score = scoreZone(z.factors) * (z.reference ? 0.8 : 1);
+  }
+
   // Keep the strongest of levels that sit on top of each other; a crowded chart hides the useful ones.
   const minGap = Math.max(2 * tolerance, 0.5 * atr) + 2 * pad;
   candidates.sort((a, b) => b.score - a.score || a.distanceAtr - b.distanceAtr);
@@ -238,16 +262,13 @@ export function detectLiquidityZones(bars, priceStep = 0.1, options = {}) {
       if (Math.abs(e.price - last) <= pad || covered(e.price) || candidates.some(k => Math.abs(k.mid - e.price) < minGap)) continue;
       const distanceAtr = Math.abs(e.price - last) / atr;
       if (distanceAtr > o.maxDistanceAtr) continue;
-      const factors = { touches: 0.3, reaction: e.weight, recency: Math.exp(-((closed.length - 1 - e.index) / halfLife) * Math.LN2), volume: e.label === 'Volume node' ? 1 : 0.5, freshness: 1, proximity: 1 / (1 + distanceAtr / 6) };
-      candidates.push({ low: e.price - pad, high: e.price + pad, mid: e.price, type: e.type, state: 'UNTESTED', touches: 0, score: 0, factors, distanceAtr, formedIndex: e.index, reference: true, label: e.label });
+      const factors = { touches: 0.3, reaction: e.weight, confluence: 0, recency: Math.exp(-((closed.length - 1 - e.index) / halfLife) * Math.LN2), volume: e.label === 'Volume node' ? 1 : 0.5, freshness: 1, proximity: 1 / (1 + distanceAtr / 6) };
+      const z = { low: e.price - pad, high: e.price + pad, mid: e.price, type: e.type, state: 'UNTESTED', touches: 0, score: 0, factors, distanceAtr, formedIndex: e.index, reference: true, label: e.label, sources: [] };
+      z.reactions = measureZoneReactions(closed, z, { atr });
+      z.factors.measured = z.reactions.rate;
+      z.score = scoreZone(z.factors) * 0.8;
+      candidates.push(z);
     }
-  }
-
-  // Measure what price actually did at each level before ranking: a zone's strength must be backed by evidence.
-  for (const z of candidates) {
-    z.reactions = measureZoneReactions(closed, z, { atr });
-    z.factors.measured = z.reactions.rate;
-    z.score = scoreZone(z.factors) * (z.reference ? 0.8 : 1);
   }
 
   // Rank, then keep at least one level on each side of price when there is room.
@@ -278,7 +299,7 @@ export function detectLiquidityZones(bars, priceStep = 0.1, options = {}) {
       id, side, low: Number(z.low.toFixed(5)), high: Number(z.high.toFixed(5)),
       strength: Number(Math.min(0.98, Math.max(0.05, z.score)).toFixed(2)),
       label: z.state === 'FLIPPED' && !z.label.startsWith('Role-flip') ? `${z.label} · role flip` : z.label, distance: (distance > 0 ? '+' : '') + distance.toFixed(2), distanceAtr: Number(z.distanceAtr.toFixed(2)),
-      state, formedAt: closed[z.formedIndex]?.time ?? null, touches: z.touches, reactions: z.reactions,
+      state, formedAt: closed[z.formedIndex]?.time ?? null, touches: z.touches, reactions: z.reactions, sources: z.sources || [],
       factors: Object.fromEntries(Object.entries(z.factors).map(([k, v]) => [k, Number(v.toFixed(2))]))
     };
   });

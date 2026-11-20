@@ -164,6 +164,19 @@ try {
   assert.ok(mobile.scrollWidth <= mobile.width, 'mobile page must not overflow horizontally');
   assert.ok(mobile.chart > 0 && mobile.footprint > 0, 'chart and footprint must remain visible on mobile');
   await page.screenshot({ path:'artifacts/market-lab-mobile.png', fullPage:true });
+  await page.setViewportSize({ width: 3840, height: 2160 });
+  await page.waitForTimeout(400);
+  const wide = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - innerWidth,
+    wrap: document.querySelector('.price-chart-wrap')?.clientWidth || 0,
+    chart: document.querySelector('#priceChart')?.getBoundingClientRect().width || 0,
+    content: document.querySelector('.main-content')?.getBoundingClientRect().width || 0,
+    bars: document.querySelectorAll('.candle').length
+  }));
+  assert.ok(wide.overflow <= 0, '4K must not overflow horizontally');
+  assert.ok(wide.content > 2000, '4K workspace must use the extra width instead of a 1680px strip');
+  assert.ok(wide.chart >= wide.wrap * 0.85, 'chart must fill the panel on wide screens');
+  await page.screenshot({ path:'artifacts/market-lab-4k.png', fullPage:true });
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
   process.stdout.write('Browser checks passed: empty state, chart, footprint, zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
 } finally {

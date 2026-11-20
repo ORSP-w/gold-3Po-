@@ -137,7 +137,7 @@ async function calculateRisk() {
     const response = await fetch('/v1/risk/plan?'+query.toString(),{cache:'no-store'});
     const data = await response.json();
     if (!response.ok) throw new Error(apiError(data,'Расчёт риска не выполнен'));
-    $('riskResult').textContent = `${data.allowed?'ПЛАН ПРОХОДИТ ПРОВЕРКУ':'ПЛАН ЗАБЛОКИРОВАН'} · ${data.direction?sideText(data.direction):'НАПРАВЛЕНИЕ НЕ ОПРЕДЕЛЕНО'} · объём ${data.quantity.toFixed(4)} ед. · плановый убыток ${money(data.plannedLoss)} · целевая прибыль ${money(data.plannedGain)} · R:R ${data.riskReward.toFixed(2)}:1`;
+    $('riskResult').textContent = `${data.allowed?'ПЛАН ПРОХОДИТ ПРОВЕРКУ':'ПЛАН ЗАБЛОКИРОВАН'} · ${data.direction?sideText(data.direction):'НАПРАВЛЕНИЕ НЕ ОПРЕДЕЛЕНО'} · объём ${Number(data.quantity.toFixed(4)).toLocaleString('ru-RU',{maximumFractionDigits:4})} ед. · плановый убыток ${money(data.plannedLoss)} · целевая прибыль ${money(data.plannedGain)} · R:R ${money(data.riskReward)}:1`;
     $('riskChecks').textContent = data.checks.map(item=>(item.passed?'ОК':'БЛОК')+' — '+item.message).join(' · ');
     notify(data.allowed?'План риска в пределах заданных лимитов.':'План риска заблокирован ограничителями.');
   } catch(error) { notify('Ошибка расчёта риска: '+error.message); }
