@@ -11,6 +11,7 @@ import { createMarketServer } from '../server.js';
 import { createLicenseManager } from '../license.js';
 import { createSetupStore } from '../setup-store.js';
 import { createSettingsStore } from '../settings-store.js';
+import { createPatternStore } from '../pattern-store.js';
 
 app.setName('GOLD-3Po Market Lab');
 if (process.platform === 'win32') app.setAppUserModelId('by.gold3po.marketlab');
@@ -140,12 +141,15 @@ async function startLocalApi() {
   const setupStore = createSetupStore({ file: path.join(userDataPath, 'setups.json') });
   // Zone and MT5 drawing preferences; a separate file so the app's own settings.json (token, port) is never overwritten.
   const settingsStore = createSettingsStore({ file: path.join(userDataPath, 'zone-settings.json') });
+  // Pattern memory: closed setups the strategy produced, kept beside the setups library.
+  const patternStore = createPatternStore({ file: path.join(userDataPath, 'patterns.json') });
   marketServer = createMarketServer({
     token: settings.marketIngestToken,
     storageFile: storagePath,
     license,
     setupStore,
-    settingsStore
+    settingsStore,
+    patternStore
   }).server;
 
   const address = await listen(marketServer, port);

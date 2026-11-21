@@ -154,6 +154,83 @@ try {
   await page.waitForFunction(() => document.querySelector('#riskResult')?.textContent.includes('ПЛАН ПРОХОДИТ ПРОВЕРКУ'), null, { timeout:5000 });
   assert.match(await page.locator('#riskChecks').innerText(), /ОК/);
 
+  // Pattern memory: the module is wired and answers its honest state, never an invented win rate.
+  assert.ok(await page.locator('#patternResult').count() === 1, 'the pattern memory panel must exist');
+  assert.ok(await page.locator('#findAnalogues').count() === 1, 'the analogue search button must exist');
+  await page.locator('#findAnalogues').click();
+  await page.waitForTimeout(900);
+  assert.match(await page.locator('#patternResult').innerText(), /аналог|снятия ликвидности|Память|порог|винрейт/i, 'the panel must report its state, not stay blank');
+
+  // The two dormant footprint settings now have controls, and each one moves the screen. A synthetic
+  // forming bar is built tick by tick through the same market-tick path the SSE feed uses: three
+  // consecutive ask-heavy rows over light bids make a stack, and one dominant row pins the value area.
+  await page.evaluate(() => {
+    const tick = (last, side, volume) => window.dispatchEvent(new CustomEvent('market-tick', { detail: { timestamp: new Date().toISOString(), last, aggressorSide: side, tickVolume: volume, realVolume: 0 } }));
+    tick(2649.30, 'buy', 25);
+    tick(2649.20, 'buy', 25); tick(2649.20, 'sell', 5);
+    tick(2649.10, 'buy', 200); tick(2649.10, 'sell', 5);
+    tick(2649.00, 'sell', 5);
+  });
+  await page.waitForTimeout(600);
+  // The footprint window follows the selected bar: reset to the newest so the forming column is in view.
+  await page.locator('#resetView').click();
+  await page.waitForTimeout(400);
+  await page.locator('.foot-cell.foot-forming').first().click();
+  await page.waitForTimeout(300);
+  let verdict = await page.locator('#flowVerdict').innerText();
+  assert.match(verdict, /стеков/, 'the default settings must mark the stack in the forming bar');
+  const formingImbalanceCells = () => page.evaluate(() => {
+    const forming = document.querySelector('.foot-cell.foot-forming');
+    const idx = forming?.getAttribute('data-index');
+    return idx === null ? -1 : document.querySelectorAll(`.foot-cell[data-index="${idx}"].imbalance-buy, .foot-cell[data-index="${idx}"].imbalance-sell`).length;
+  });
+  const imbalancesBefore = await formingImbalanceCells();
+  assert.ok(imbalancesBefore >= 3, 'the synthetic bar must mark at least three imbalance cells, got ' + imbalancesBefore);
+
+  await page.locator('#openSettings').click();
+  await page.waitForSelector('#settingsDialog[open]');
+  await page.locator('#settingsTabs button[data-tab="footprint"]').click();
+  // Slider 1: stack length. Raising it dissolves the stack but keeps the single imbalances.
+  await page.locator('#setImbalanceLevels').evaluate(el => { el.value = '10'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  verdict = await page.locator('#flowVerdict').innerText();
+  assert.ok(!/стеков/.test(verdict), 'raising the stack-length setting must dissolve the stack in the forming bar');
+  // Slider 2: minimum level volume. Raising it strips the thin imbalanced rows as noise.
+  await page.locator('#setMinLevelVolume').evaluate(el => { el.value = '30'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const imbalancesAfter = await formingImbalanceCells();
+  assert.ok(imbalancesAfter < imbalancesBefore, 'raising the minimum level volume must remove imbalance marks: ' + imbalancesAfter + ' after vs ' + imbalancesBefore + ' before');
+  const savedFootprint = await (await fetch(base + '/v1/settings')).json();
+  assert.equal(savedFootprint.footprint.imbalanceLevels, 10, 'the stack-length setting must be saved');
+  assert.equal(savedFootprint.footprint.minLevelVolume, 30, 'the min-level setting must be saved');
+  // The value-area share: at the default 70% the dominant row alone covers it (a one-row area);
+  // at 95% the area must widen past the point of control. The forming bar is recomputed locally
+  // by the live-tick path, so this checks exactly the code that used to ignore the setting.
+  const vaRange = async () => {
+    const text = await page.locator('#valueAreaRange').innerText();
+    const match = text.match(/([\d\s,\u00a0]+?)\s*—\s*([\d\s,\u00a0]+?)\s*·/);
+    if (!match) return null;
+    const num = v => Number(v.replace(/[\s\u00a0]/g, '').replace(',', '.'));
+    return { low: num(match[1]), high: num(match[2]), text };
+  };
+  const vaNarrow = await vaRange();
+  assert.ok(vaNarrow, 'the inspector must show the forming bar value area: ' + (vaNarrow ? '' : await page.locator('#valueAreaRange').innerText()));
+  assert.equal(vaNarrow.high, vaNarrow.low, 'at the default 70% share the dominant row alone is the value area');
+  await page.locator('#setValueAreaShare').evaluate(el => { el.value = '95'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
+  await page.waitForTimeout(400);
+  const vaWide = await vaRange();
+  assert.ok(vaWide.high > vaWide.low, 'at 95% the forming bar value area must widen beyond the point of control: ' + vaWide.text);
+  // Restore the defaults so the later sections (setup library, dense 4K history) start from them.
+  await page.locator('#settingsReset').click();
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Настройки сброшены', null, { timeout: 5000 });
+  // Back to the zones pane: the next settings section expects the dialog's default tab.
+  await page.locator('#settingsTabs button[data-tab="zones"]').click();
+  await page.locator('#settingsClose').click();
+  await page.waitForTimeout(300);
+
   // Vespera-style setup library: save, apply and verify the active conditions propagate.
   await page.locator('#setupName').fill('Browser strict');
   await page.locator('#condStacked').check();
