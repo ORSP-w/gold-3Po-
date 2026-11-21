@@ -315,11 +315,38 @@ test('the analogue search reuses its reference between polls and refreshes it on
   // A second poll with a different threshold reuses the cached reference: same signal time.
   const second = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000&threshold=0.6')).json();
   assert.equal(second.reference.signalTime, referenceTime, 'the cached reference is reused between polls');
-  // New events invalidate the cache: a later tick moves the reference.
-  const later = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(Date.now() + 120000).toISOString(), sequence: Date.now(), bid: 2648.2, ask: 2648.4, last: 2648.3, tickVolume: 1, realVolume: 1, flags: 0 };
-  await fetch(base + '/v1/ingest/mt5/tick', { method: 'POST', headers: auth, body: JSON.stringify(later) });
+  // New events invalidate the cache: a later sweep must move the reference to a newer signal,
+  // which only happens if the invalidation keyed on something that moves with every event,
+  // not on the event count (which stays constant once the rolling buffer is full).
+  // The later events are a sweep-and-reclaim followed by a quiet close, so the sweep bar closes
+  // and the strategy fires a newer signal than the cached reference.
+  // A genuine new sweep in a closed bucket AFTER the fixture's last bar but before now, so the
+  // licence clock watermark stays honest: the dip below the fixture's lowest low (~2644.4), the
+  // reclaim back above it in the same bucket, then a quiet bar in the next bucket closes it.
+  const sweepBucket = Math.floor((Date.now() - 2400000) / 900000) * 900000; // ~40 minutes ago
+  const seq = Date.now();
+  const sweep = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 60000).toISOString(), sequence: seq, bid: 2644.2, ask: 2644.4, last: 2644.3, tickVolume: 5, realVolume: 5, flags: 64 };
+  const reclaim = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 300000).toISOString(), sequence: seq + 1, bid: 2644.6, ask: 2644.8, last: 2644.7, tickVolume: 5, realVolume: 5, flags: 32 };
+  const quietClose = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 1000000).toISOString(), sequence: seq + 2, bid: 2644.7, ask: 2644.9, last: 2644.8, tickVolume: 2, realVolume: 2, flags: 0 };
+  for (const tick of [sweep, reclaim, quietClose]) await fetch(base + '/v1/ingest/mt5/tick', { method: 'POST', headers: auth, body: JSON.stringify(tick) });
   const third = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000&threshold=0.6')).json();
-  assert.equal(third.symbol, 'XAUUSD', 'the endpoint still answers after new events');
+  assert.ok(third.reference, 'the endpoint still yields a reference after new events');
+  assert.notEqual(third.reference.signalTime, referenceTime, 'a new event must rebuild the reference, not serve the cached one');
+});
+
+test('a settings change invalidates the analogue cache, not just new events', async () => {
+  await ingestHistory(stackFixture());
+  // Prime the cache under the default footprint settings: the reference's fingerprint includes
+  // the stacked-imbalance axis, which the fixture's stack satisfies.
+  const first = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.ok(first.reference, 'the fixture must yield a reference signal');
+  // Remove the fixture's stack via a footprint setting: the cached reference must be rebuilt, so
+  // the stacked axis flips and the new reference's fingerprint differs from the stale cached one.
+  await fetch(base + '/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ footprint: { imbalanceLevels: 10 } }) });
+  const second = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.ok(second.reference, 'the reference still exists after a settings change');
+  assert.notEqual(second.reference.fingerprint, first.reference.fingerprint, 'a footprint change must rebuild the reference: the fingerprint keeps the stale stacked axis otherwise');
+  await fetch(base + '/v1/settings/reset', { method: 'POST' });
 });
 
 test('pattern analogues endpoint is licence-gated like every research route', async () => {

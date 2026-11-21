@@ -11,6 +11,9 @@ const finite = Number.isFinite;
 const sides = ['long', 'short'];
 
 export const MIN_CALIBRATION_SAMPLES = 30;
+// The workspace's default timeframe: 15 minutes. Records persisted before intervalMs became part
+// of the schema are migrated to this on load — an upgrade keeps the accumulated memory.
+export const DEFAULT_INTERVAL_MS = 900000;
 
 export function patternFingerprint(pattern) {
   const canonical = JSON.stringify([
@@ -191,23 +194,35 @@ const median = values => { const v = values.filter(finite).sort((a, b) => a - b)
 export function createPatternStore({ file = './data/patterns.json', now = () => Date.now() } = {}) {
   let observations = [];
   let loaded = false;
+  let poisoned = false; // a corrupt memory file: readable list, but never overwritten this run
 
   async function load() {
     if (loaded) return;
     loaded = true;
     if (!file) return;
     let stored = null;
-    try { stored = JSON.parse(await readFile(file, 'utf8')); } catch { /* fresh memory */ }
+    try { stored = JSON.parse(await readFile(file, 'utf8')); } catch (error) {
+      if (error?.code === 'ENOENT') return; // a fresh install: no memory file yet, nothing lost
+      // A whole-file parse failure is never silent and never destroys history: log it, and mark
+      // the memory unwritable so the next persist() cannot overwrite a possibly-recoverable file.
+      process.stderr.write(`[pattern-store] cannot read the pattern memory at ${file}: ${error.message}; starting empty, the file will not be overwritten this run\n`);
+      poisoned = true;
+      return;
+    }
     if (!Array.isArray(stored?.observations)) return;
     // Validate per observation: one malformed or semantically invalid record is skipped (and
     // logged, so a corrupt file is distinguishable from a fresh install), never a reason to
     // silently drop the whole accumulated memory — which would break the append-only contract.
+    // Records written before intervalMs existed (an earlier version of the store) default their
+    // timeframe to the 15-minute interval the workspace has always used, so an upgrade keeps
+    // the accumulated memory instead of failing validation record by record.
     observations = [];
     for (const raw of stored.observations) {
       try {
         // The persisted envelope (id, recordedAt, technicalScore, the stored fingerprint) is
         // stripped before validation: the pattern itself is re-validated and re-fingerprinted.
         const { id, recordedAt, technicalScore, fingerprint, ...pattern } = raw;
+        if (pattern.intervalMs === undefined) pattern.intervalMs = DEFAULT_INTERVAL_MS;
         const clean = validatePattern(pattern);
         observations.push({ ...clean, id: typeof id === 'string' && id.length <= 40 ? id : clean.fingerprint, recordedAt: recordedAt || null, technicalScore: Number(technicalScore) || null });
       } catch (error) {
@@ -218,6 +233,7 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
 
   async function persist() {
     if (!file) return;
+    if (poisoned) return; // never overwrite a file this process could not read
     await mkdir(dirname(file), { recursive: true });
     const tmp = file + '.tmp';
     await writeFile(tmp, JSON.stringify({ observations }, null, 2), 'utf8');

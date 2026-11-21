@@ -170,13 +170,33 @@ test('recordMany caps how many records one call can add', async () => {
   assert.ok(recorded <= 500, 'the cap holds: recorded ' + recorded);
 });
 
-test('store survives a hand-broken file by starting from an empty memory', async () => {
+test('store survives a hand-broken file by starting from an empty memory, never overwriting it', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'gold3po-patterns-'));
   const file = join(dir, 'patterns.json');
   await writeFile(file, '{not json', 'utf8');
   const store = createPatternStore({ file });
   const list = await store.list();
-  assert.equal(list.count, 0);
+  assert.equal(list.count, 0, 'a corrupt file starts an empty memory');
+  // Recording a new setup must not overwrite the corrupt file: persist is refused while poisoned.
+  await store.record(signal(10, { id: 'SIG-10' }), trade({ signalIndex: 10, entryIndex: 11, exitIndex: 14 }), bars(), 'XAUUSD', INTERVAL);
+  const raw = await readFile(file, 'utf8');
+  assert.equal(raw, '{not json', 'the corrupt file is left untouched for recovery');
+});
+
+test('records persisted before intervalMs existed migrate to the default timeframe on load', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'gold3po-patterns-'));
+  const seedFile = join(dir, 'seed.json'), file = join(dir, 'patterns.json');
+  const seedStore = createPatternStore({ file: seedFile });
+  const good = await seedStore.record(signal(), trade(), bars(), 'XAUUSD', INTERVAL);
+  // a record exactly as the previous version wrote it: no intervalMs anywhere
+  const legacy = JSON.parse(await readFile(seedFile, 'utf8')).observations[0];
+  delete legacy.intervalMs;
+  await writeFile(file, JSON.stringify({ observations: [legacy] }), 'utf8');
+  const store = createPatternStore({ file });
+  const list = await store.list();
+  assert.equal(list.count, 1, 'a legacy record is kept, not skipped as invalid');
+  assert.equal(list.observations[0].intervalMs, 900000, 'the legacy record is migrated to the default 15m timeframe');
+  assert.equal(list.observations[0].fingerprint, good.observation.fingerprint);
 });
 
 test('one invalid stored observation is skipped, not the whole memory', async () => {

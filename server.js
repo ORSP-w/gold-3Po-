@@ -92,10 +92,23 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   })() : Promise.resolve();
   async function persistMany(storedEvents) { if (!dataFile || !storedEvents.length) return; await mkdir(dirname(dataFile), { recursive:true }); await appendFile(dataFile, storedEvents.map(event => JSON.stringify(event)).join('\n')+'\n'); }
   async function persist(stored) { return persistMany([stored]); }
-  // Cache for the analogue search's reference pipeline, keyed by market and timeframe and
-  // invalidated when the event count moves: the panel polls on every market-analysis event,
-  // and only the threshold changes between polls.
+  // Cache for the analogue search's reference pipeline. Invalidated by a monotonic ingest
+  // watermark (not the event count, which stops moving once the rolling buffer is full) and by
+  // the settings/setup revision (a footprint change or a newly applied setup must rebuild the
+  // marks, not keep serving the old ones). Bounded to one entry per market+timeframe: the last
+  // used key wins, so distinct symbols cannot pin unbounded bar arrays for the process lifetime.
   const analogueCache = new Map();
+  const ANALOGUE_CACHE_MAX = 8;
+  let ingestWatermark = 0; // rises on every accepted market event, never resets
+  let settingsRevision = 0; // rises on every settings or setup change
+  function cachePut(key, entry) {
+    if (analogueCache.size >= ANALOGUE_CACHE_MAX) {
+      // drop the oldest inserted entry that is not the one being refreshed
+      const oldest = analogueCache.keys().next().value;
+      if (oldest !== key) analogueCache.delete(oldest); else analogueCache.delete(analogueCache.keys().next().value);
+    }
+    analogueCache.set(key, entry);
+  }
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: MAX_EVENTS, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
@@ -141,8 +154,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (url.pathname === '/v1/settings' || url.pathname === '/v1/settings/reset') {
       try {
         if (req.method === 'GET' && url.pathname === '/v1/settings') return json(res, 200, await settings.get());
-        if (req.method === 'PUT' && url.pathname === '/v1/settings') return json(res, 200, await settings.update(await readJson(req)));
-        if (req.method === 'POST' && url.pathname === '/v1/settings/reset') return json(res, 200, await settings.reset());
+        if (req.method === 'PUT' && url.pathname === '/v1/settings') { const updated = await settings.update(await readJson(req)); settingsRevision += 1; return json(res, 200, updated); }
+        if (req.method === 'POST' && url.pathname === '/v1/settings/reset') { const reset = await settings.reset(); settingsRevision += 1; return json(res, 200, reset); }
         return json(res, 405, { error: 'method_not_allowed' });
       } catch (error) { return json(res, error.status || 422, { error: 'invalid_settings', message: error.message }); }
     }
@@ -167,7 +180,9 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         if (req.method === 'POST' && url.pathname === '/v1/setups/apply') {
           const body = await readJson(req);
           if (typeof body?.id !== 'string') return json(res, 422, { error: 'invalid_setup_request', message: 'id is required' });
-          return json(res, 200, await setups.apply(body.id, body.version ?? null));
+          const applied = await setups.apply(body.id, body.version ?? null);
+          settingsRevision += 1;
+          return json(res, 200, applied);
         }
         return json(res, 405, { error: 'method_not_allowed' });
       } catch (error) { return json(res, error.status || 422, { error: 'invalid_setup', message: error.message }); }
@@ -266,16 +281,18 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
       const analogueSettings = await settings.get();
-      // The reference pipeline (analysis + signals) is cached per symbol/source/interval: the panel
-      // auto-refreshes on every market-analysis event, and only the threshold changes between
-      // those polls, so the heavy work must not re-run each time. New events invalidate the cache.
-      const cacheKey = source + ':' + symbol + ':' + intervalMs;
+      // The reference pipeline (analysis + signals) is cached per symbol/source/interval plus the
+      // settings and setup revisions: the panel auto-refreshes on every market-analysis event, and
+      // only the threshold changes between polls, so the heavy work must not re-run each time.
+      // New events (watermark) or a settings/setup change rebuild the cache; the watermark is
+      // monotonic, so it moves even when the rolling event buffer is full and the count is constant.
+      const cacheKey = source + ':' + symbol + ':' + intervalMs + ':' + settingsRevision;
       let cached = analogueCache.get(cacheKey);
-      if (!cached || cached.eventCount !== selected.length) {
+      if (!cached || cached.watermark !== ingestWatermark) {
         const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
         const signals = generateSignals(analysis.bars, active.strategy);
-        cached = { eventCount: selected.length, reference: signals.at(-1) || null, bars: analysis.bars };
-        analogueCache.set(cacheKey, cached);
+        cached = { watermark: ingestWatermark, reference: signals.at(-1) || null, bars: analysis.bars };
+        cachePut(cacheKey, cached);
       }
       if (!cached.reference) return json(res, 200, { symbol, source, reference: null, count: 0, analogues: [], winRate: null, calibrated: false, memory: (await patterns.list()).count, message: 'В текущей истории нет подходящего снятия ликвидности, с чем можно сравнивать.' });
       try {
@@ -319,6 +336,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
+          ingestWatermark += 1;
           const existing = feeds.get(key);
           feeds.set(key,{source:'mt5',symbol:stored.symbol,lastSequence:stored.sequence,receivedAt:Date.parse(stored.receivedAt),accepted:(existing?.accepted||0)+1});
           const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
@@ -352,6 +370,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
           if (events.length > MAX_EVENTS) events.shift();
+          ingestWatermark += 1;
           const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
           for (const client of clients) client.write(packet);
           accepted++;
@@ -380,6 +399,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       lastSequence.set(key, event.sequence);
       events.push(stored);
       if (events.length > MAX_EVENTS) events.shift();
+      ingestWatermark += 1;
       const existing = feeds.get(key);
       feeds.set(key, { source:event.source, symbol:event.symbol, lastSequence:event.sequence, receivedAt, accepted:(existing?.accepted||0)+1 });
       const packet = 'event: market\ndata: ' + JSON.stringify(stored) + '\n\n';
