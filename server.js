@@ -265,7 +265,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       try {
         const results = await patterns.recordMany(signals, simulation.trades, analysis.bars, symbol, intervalMs);
         const memoryHealth = await patterns.health();
-        patternSummary = { recorded: results.filter(r => r.recorded).length, memory: memoryHealth.observations, persisted: memoryHealth.persisted };
+        patternSummary = { recorded: results.filter(r => r.recorded).length, memory: memoryHealth.observations, writable: memoryHealth.writable };
       } catch (error) { patternSummary = { recorded: 0, error: error.message }; }
       return json(res, 200, { symbol, source, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, patternMemory: patternSummary, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Технические оценки — это веса правил, а не вероятности. Вероятность показывается только после 30 закрытых сделок в том же направлении.' });
     }

@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createMarketServer } from './server.js';
 import { createLicenseManager, issueLicenseKey } from './license.js';
 import { createSetupStore } from './setup-store.js';
@@ -344,11 +347,37 @@ async function ingestHistoryAt(url, ticks) {
   }
 }
 
-test('the signals route reports whether the pattern memory actually persisted', async () => {
-  await ingestHistory(sweepFixture());
-  const first = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
-  assert.equal(first.patternMemory.persisted, true, 'a healthy memory file reports persisted: true');
-  assert.ok(first.patternMemory.recorded > 0);
+test('the signals route reports whether the pattern memory is actually writable', async () => {
+  // A real file-backed memory on a temp directory: a healthy file reports writable: true.
+  const healthyDir = await mkdtemp(join(tmpdir(), 'gold3po-signals-'));
+  const healthyApp = createMarketServer({ token: 'test-secret', storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }), patternStore: createPatternStore({ file: join(healthyDir, 'patterns.json') }) });
+  const healthyServer = healthyApp.server;
+  await new Promise(resolve => healthyServer.listen(0, '127.0.0.1', resolve));
+  const healthyUrl = 'http://127.0.0.1:' + healthyServer.address().port;
+  try {
+    await ingestHistoryAt(healthyUrl, sweepFixture());
+    const healthy = await (await fetch(healthyUrl + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+    assert.equal(healthy.patternMemory.writable, true, 'a healthy memory file reports writable: true');
+    assert.ok(healthy.patternMemory.recorded > 0, 'the fixture must close at least one setup');
+    const stored = JSON.parse(await readFile(join(healthyDir, 'patterns.json'), 'utf8'));
+    assert.ok(stored.observations.length > 0, 'the batch actually reached the disk');
+  } finally { await new Promise(resolve => healthyServer.close(resolve)); }
+  // A poisoned memory (a corrupt file at startup) reports writable: false while still recording
+  // in memory, so "recorded but not saved" is distinguishable from "saved".
+  const poisonedDir = await mkdtemp(join(tmpdir(), 'gold3po-signals-'));
+  const poisonedFile = join(poisonedDir, 'patterns.json');
+  await writeFile(poisonedFile, '{not json', 'utf8');
+  const poisonedApp = createMarketServer({ token: 'test-secret', storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }), patternStore: createPatternStore({ file: poisonedFile }) });
+  const poisonedServer = poisonedApp.server;
+  await new Promise(resolve => poisonedServer.listen(0, '127.0.0.1', resolve));
+  const poisonedUrl = 'http://127.0.0.1:' + poisonedServer.address().port;
+  try {
+    await ingestHistoryAt(poisonedUrl, sweepFixture());
+    const poisoned = await (await fetch(poisonedUrl + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+    assert.equal(poisoned.patternMemory.writable, false, 'a poisoned memory reports writable: false');
+    assert.ok(poisoned.patternMemory.recorded > 0, 'the setups are still recorded in memory, which is exactly the recorded-but-not-saved state');
+    assert.equal(await readFile(poisonedFile, 'utf8'), '{not json', 'the corrupt file is never rewritten');
+  } finally { await new Promise(resolve => poisonedServer.close(resolve)); }
 });
 
 test('the analogue search reuses its reference between polls and refreshes it on new events', async () => {

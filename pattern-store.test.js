@@ -181,10 +181,18 @@ test('store survives a hand-broken file by starting from an empty memory, never 
   await store.record(signal(10, { id: 'SIG-10' }), trade({ signalIndex: 10, entryIndex: 11, exitIndex: 14 }), bars(), 'XAUUSD', INTERVAL);
   const raw = await readFile(file, 'utf8');
   assert.equal(raw, '{not json', 'the corrupt file is left untouched for recovery');
-  // And the store's health says so: records count in memory but are reported as not persisted.
+  // And the store's health says so: records count in memory but the file is reported unwritable.
   const health = await store.health();
-  assert.equal(health.persisted, false, 'the poisoned state is visible to the caller');
+  assert.equal(health.writable, false, 'the poisoned state is visible to the caller');
   assert.equal(health.observations, 1, 'the in-memory record is still counted');
+});
+
+test('a store with no file configured reports writable: false, never pretending to save', async () => {
+  const store = createPatternStore({ file: null });
+  const list = await store.list();
+  assert.equal(list.count, 0);
+  const health = await store.health();
+  assert.equal(health.writable, false, 'a file-less store never writes, so it must not report writable: true');
 });
 
 test('a memory file with a wrong shape is treated like a parse failure, never rewritten', async () => {
@@ -198,7 +206,7 @@ test('a memory file with a wrong shape is treated like a parse failure, never re
     await store.record(signal(10, { id: 'SIG-10' }), trade({ signalIndex: 10, entryIndex: 11, exitIndex: 14 }), bars(), 'XAUUSD', INTERVAL);
     const raw = await readFile(file, 'utf8');
     assert.equal(raw, wrong, 'the wrong-shaped file is left untouched: ' + wrong);
-    assert.equal((await store.health()).persisted, false, 'the state is visible: ' + wrong);
+    assert.equal((await store.health()).writable, false, 'the state is visible: ' + wrong);
   }
 });
 

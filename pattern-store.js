@@ -17,7 +17,6 @@ export const MIN_CALIBRATION_SAMPLES = 30;
 // timeframe they were not. They carry UNKNOWN_INTERVAL_MS instead: kept in memory, never
 // destroyed, but excluded from matching until the memory naturally refills at a known timeframe.
 export const UNKNOWN_INTERVAL_MS = 0;
-export const DEFAULT_INTERVAL_MS = 900000;
 
 export function patternFingerprint(pattern) {
   const canonical = JSON.stringify([
@@ -290,8 +289,10 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
     return results;
   }
 
-  // The memory's health as the caller needs it: whether writes actually reach the file.
-  async function health() { await load(); return { observations: observations.length, persisted: !poisoned }; }
+  // The memory's health as the caller needs it: whether writes can actually reach a file.
+  // A store with no file configured never writes anything, so it reports writable: false just
+  // like a poisoned one — the field measures writability, not the absence of a load failure.
+  async function health() { await load(); return { observations: observations.length, writable: Boolean(file) && !poisoned }; }
 
   // The reference pattern built from the live signal the page is looking at.
   async function analoguesForSignal(signal, bars, symbol, intervalMs, options = {}) {
