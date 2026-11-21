@@ -11,8 +11,12 @@ const finite = Number.isFinite;
 const sides = ['long', 'short'];
 
 export const MIN_CALIBRATION_SAMPLES = 30;
-// The workspace's default timeframe: 15 minutes. Records persisted before intervalMs became part
-// of the schema are migrated to this on load — an upgrade keeps the accumulated memory.
+// The timeframe a pattern was observed at. Records persisted before intervalMs became part of
+// the schema cannot know theirs: the workspace timeframe is user-selectable (5/15/30/60/240
+// minutes), so relabelling them with any specific interval would offer analogues observed at a
+// timeframe they were not. They carry UNKNOWN_INTERVAL_MS instead: kept in memory, never
+// destroyed, but excluded from matching until the memory naturally refills at a known timeframe.
+export const UNKNOWN_INTERVAL_MS = 0;
 export const DEFAULT_INTERVAL_MS = 900000;
 
 export function patternFingerprint(pattern) {
@@ -41,8 +45,9 @@ export function validatePattern(input) {
   if (!/^(?:XAUUSD|GOLD)[A-Z0-9._#+-]{0,20}$/.test(p.symbol) && !/^GC[A-Z0-9]*$/.test(p.symbol)) throw new TypeError('Pattern symbol must be gold (XAUUSD or GC futures)');
   if (!sides.includes(p.side)) throw new TypeError('Pattern side must be long or short');
   // The timeframe the pattern was observed at: a 5m shape is not an analogue of a 15m setup.
+  // UNKNOWN_INTERVAL_MS (0) marks a legacy record whose timeframe cannot be known.
   p.intervalMs = Number(p.intervalMs);
-  if (!Number.isInteger(p.intervalMs) || p.intervalMs < 60000 || p.intervalMs > 86400000) throw new TypeError('Pattern intervalMs must be an integer between 60000 and 86400000');
+  if (!Number.isInteger(p.intervalMs) || !(p.intervalMs === UNKNOWN_INTERVAL_MS || (p.intervalMs >= 60000 && p.intervalMs <= 86400000))) throw new TypeError('Pattern intervalMs must be an integer between 60000 and 86400000, or 0 for an unknown legacy timeframe');
   const time = Date.parse(p.signalTime);
   if (!finite(time)) throw new TypeError('Pattern signalTime must be an ISO timestamp');
   p.signalTime = new Date(time).toISOString();
@@ -112,8 +117,9 @@ export function findAnalogues(reference, observations, { minSamples = MIN_CALIBR
   const referenceTime = Date.parse(reference.signalTime);
   const ranked = [];
   for (const observation of observations) {
-    if (observation.symbol !== reference.symbol) continue;      // the same market only
-    if (observation.intervalMs !== reference.intervalMs) continue; // the same timeframe only
+    if (observation.symbol !== reference.symbol) continue;        // the same market only
+    if (observation.intervalMs !== reference.intervalMs) continue;  // the same timeframe only
+    if (observation.intervalMs === UNKNOWN_INTERVAL_MS) continue;   // a legacy record: kept, but its timeframe is unknowable
     if (Date.parse(observation.signalTime) >= referenceTime) continue; // the past only
     const score = similarity(reference, observation);
     if (score < threshold) continue;
@@ -138,7 +144,7 @@ export function findAnalogues(reference, observations, { minSamples = MIN_CALIBR
 }
 
 function publicPattern(p) {
-  return { id: p.id, fingerprint: p.fingerprint, symbol: p.symbol, intervalMs: p.intervalMs, side: p.side, session: p.session, signalTime: p.signalTime, signalIndex: p.signalIndex, entryIndex: p.entryIndex, exitIndex: p.exitIndex, exitTime: p.exitTime, exitReason: p.exitReason, netR: p.netR, technicalScore: p.technicalScore };
+  return { id: p.id, fingerprint: p.fingerprint, symbol: p.symbol, intervalMs: p.intervalMs, side: p.side, session: p.session, signalTime: p.signalTime, signalIndex: p.signalIndex, entryIndex: p.entryIndex, exitIndex: p.exitIndex, exitTime: p.exitTime, exitReason: p.exitReason, netR: p.netR, technicalScore: p.technicalScore, stackCount: p.stackCount, stacked: p.stacked };
 }
 
 // Trading-session bucket from the signal's UTC hour, matching the zone engine's session split.
@@ -209,20 +215,27 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
       poisoned = true;
       return;
     }
-    if (!Array.isArray(stored?.observations)) return;
+    // A file that parses but is not the memory shape (an empty object, an array, a null
+    // observations field) is treated exactly like a parse failure on an existing file: logged and
+    // never overwritten, because a rewrite would destroy whatever the file actually holds.
+    if (!Array.isArray(stored?.observations)) {
+      process.stderr.write(`[pattern-store] the pattern memory at ${file} has an unexpected shape; starting empty, the file will not be overwritten this run\n`);
+      poisoned = true;
+      return;
+    }
     // Validate per observation: one malformed or semantically invalid record is skipped (and
     // logged, so a corrupt file is distinguishable from a fresh install), never a reason to
     // silently drop the whole accumulated memory — which would break the append-only contract.
-    // Records written before intervalMs existed (an earlier version of the store) default their
-    // timeframe to the 15-minute interval the workspace has always used, so an upgrade keeps
-    // the accumulated memory instead of failing validation record by record.
+    // Records written before intervalMs existed (an earlier version of the store) keep their
+    // history under the unknown-timeframe marker: their timeframe cannot be reconstructed, so
+    // they never rank as analogues of a setup observed at a known timeframe.
     observations = [];
     for (const raw of stored.observations) {
       try {
         // The persisted envelope (id, recordedAt, technicalScore, the stored fingerprint) is
         // stripped before validation: the pattern itself is re-validated and re-fingerprinted.
         const { id, recordedAt, technicalScore, fingerprint, ...pattern } = raw;
-        if (pattern.intervalMs === undefined) pattern.intervalMs = DEFAULT_INTERVAL_MS;
+        if (pattern.intervalMs === undefined) pattern.intervalMs = UNKNOWN_INTERVAL_MS;
         const clean = validatePattern(pattern);
         observations.push({ ...clean, id: typeof id === 'string' && id.length <= 40 ? id : clean.fingerprint, recordedAt: recordedAt || null, technicalScore: Number(technicalScore) || null });
       } catch (error) {
@@ -258,7 +271,9 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
   }
 
   // One persist for the whole batch: recording a large closed history must not rewrite the
-  // memory file hundreds of times inside a single signals call.
+  // memory file hundreds of times inside a single signals call. The returned state says whether
+  // the batch actually landed on disk: while the memory file is poisoned (unreadable), records
+  // accumulate in memory but are never saved, and the caller must be able to tell that apart.
   async function recordMany(signals, trades, bars, symbol, intervalMs, { maxRecords = 500 } = {}) {
     await load();
     const results = [];
@@ -275,6 +290,9 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
     return results;
   }
 
+  // The memory's health as the caller needs it: whether writes actually reach the file.
+  async function health() { await load(); return { observations: observations.length, persisted: !poisoned }; }
+
   // The reference pattern built from the live signal the page is looking at.
   async function analoguesForSignal(signal, bars, symbol, intervalMs, options = {}) {
     await load();
@@ -286,7 +304,7 @@ export function createPatternStore({ file = './data/patterns.json', now = () => 
 
   async function list() { await load(); return { count: observations.length, observations: observations.map(publicPattern) }; }
 
-  return { record, recordMany, analoguesForSignal, list };
+  return { record, recordMany, analoguesForSignal, list, health };
 }
 
 // A reference for a signal that has not closed yet: outcome fields are zeroed, which

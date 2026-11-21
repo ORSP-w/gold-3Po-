@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { validatePattern, similarity, findAnalogues, createPatternStore, observationFrom, patternFingerprint, MIN_CALIBRATION_SAMPLES } from './pattern-store.js';
+import { validatePattern, similarity, findAnalogues, createPatternStore, observationFrom, patternFingerprint, MIN_CALIBRATION_SAMPLES, UNKNOWN_INTERVAL_MS } from './pattern-store.js';
 
 const INTERVAL = 900000;
 const baseBar = (over = {}) => ({ time: '2026-11-18T14:15:00.000Z', o: 2648.2, h: 2651.0, l: 2647.5, c: 2650.6, volume: 120, bid: 40, ask: 80, unknown: 0, delta: 40, deltaRatio: 0.33,
@@ -181,9 +181,28 @@ test('store survives a hand-broken file by starting from an empty memory, never 
   await store.record(signal(10, { id: 'SIG-10' }), trade({ signalIndex: 10, entryIndex: 11, exitIndex: 14 }), bars(), 'XAUUSD', INTERVAL);
   const raw = await readFile(file, 'utf8');
   assert.equal(raw, '{not json', 'the corrupt file is left untouched for recovery');
+  // And the store's health says so: records count in memory but are reported as not persisted.
+  const health = await store.health();
+  assert.equal(health.persisted, false, 'the poisoned state is visible to the caller');
+  assert.equal(health.observations, 1, 'the in-memory record is still counted');
 });
 
-test('records persisted before intervalMs existed migrate to the default timeframe on load', async () => {
+test('a memory file with a wrong shape is treated like a parse failure, never rewritten', async () => {
+  for (const wrong of ['{}', '[]', '{"observations": null}']) {
+    const dir = await mkdtemp(join(tmpdir(), 'gold3po-patterns-'));
+    const file = join(dir, 'patterns.json');
+    await writeFile(file, wrong, 'utf8');
+    const store = createPatternStore({ file });
+    const list = await store.list();
+    assert.equal(list.count, 0, 'a wrong-shaped file starts an empty memory: ' + wrong);
+    await store.record(signal(10, { id: 'SIG-10' }), trade({ signalIndex: 10, entryIndex: 11, exitIndex: 14 }), bars(), 'XAUUSD', INTERVAL);
+    const raw = await readFile(file, 'utf8');
+    assert.equal(raw, wrong, 'the wrong-shaped file is left untouched: ' + wrong);
+    assert.equal((await store.health()).persisted, false, 'the state is visible: ' + wrong);
+  }
+});
+
+test('records persisted before intervalMs existed are kept under the unknown-timeframe marker, never mislabelled', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'gold3po-patterns-'));
   const seedFile = join(dir, 'seed.json'), file = join(dir, 'patterns.json');
   const seedStore = createPatternStore({ file: seedFile });
@@ -195,8 +214,13 @@ test('records persisted before intervalMs existed migrate to the default timefra
   const store = createPatternStore({ file });
   const list = await store.list();
   assert.equal(list.count, 1, 'a legacy record is kept, not skipped as invalid');
-  assert.equal(list.observations[0].intervalMs, 900000, 'the legacy record is migrated to the default 15m timeframe');
-  assert.equal(list.observations[0].fingerprint, good.observation.fingerprint);
+  assert.equal(list.observations[0].intervalMs, UNKNOWN_INTERVAL_MS, 'the legacy record carries the unknown-timeframe marker, not an invented interval');
+  assert.notEqual(list.observations[0].intervalMs, good.observation.intervalMs, 'a legacy record is never confused with a known-timeframe one');
+  // The legacy record never ranks as an analogue of a setup at a known timeframe: the user's
+  // real timeframe is selectable (5/15/30/60/240), so relabelling would offer false analogues.
+  const analogues = await store.analoguesForSignal(signal(25), bars(), 'XAUUSD', INTERVAL);
+  assert.equal(analogues.count, 0, 'an unknown-timeframe record never matches a known-timeframe reference');
+  assert.equal(analogues.memory, 1, 'the record still counts toward the memory, so nothing is silently destroyed');
 });
 
 test('one invalid stored observation is skipped, not the whole memory', async () => {

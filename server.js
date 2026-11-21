@@ -55,8 +55,9 @@ function normalizeComex(input) {
   return { type: 'trade', source: 'comex', venue: 'comex_futures', symbol: input.symbol.trim().toUpperCase(), timestamp: new Date(input.timestamp).toISOString(), sequence: input.sequence, eventId: 'COMEX-' + input.tradeId.trim(), tradeId: input.tradeId.trim(), price: input.price, size: input.size, aggressorSide: input.aggressorSide, volumeKind: 'exchange_trade_size' };
 }
 
-export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl', license = null, setupStore = null, settingsStore = null, patternStore = null } = {}) {
+export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, now = () => Date.now(), staleAfterMs = 15000, storageFile = process.env.MARKET_DATA_FILE || './data/market-events.jsonl', license = null, setupStore = null, settingsStore = null, patternStore = null, maxEvents = MAX_EVENTS } = {}) {
   const events = []; const lastSequence = new Map(); const feeds = new Map(); const clients = new Set(); const seenEventIds = new Set();
+  const eventBufferCap = Number.isInteger(maxEvents) && maxEvents > 0 ? maxEvents : MAX_EVENTS;
   const licenseManager = license || createLicenseManager({ now, required: process.env.LICENSE_REQUIRED !== '0' });
   const setups = setupStore || createSetupStore({ file: process.env.SETUPS_FILE || './data/setups.json', now });
   const settings = settingsStore || createSettingsStore({ file: process.env.SETTINGS_FILE || './data/settings.json' });
@@ -87,7 +88,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           }
         } catch {}
       }
-      if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
+      if (events.length > eventBufferCap) events.splice(0, events.length - eventBufferCap);
     } catch (error) { if (error.code !== 'ENOENT') throw error; }
   })() : Promise.resolve();
   async function persistMany(storedEvents) { if (!dataFile || !storedEvents.length) return; await mkdir(dirname(dataFile), { recursive:true }); await appendFile(dataFile, storedEvents.map(event => JSON.stringify(event)).join('\n')+'\n'); }
@@ -102,16 +103,13 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   let ingestWatermark = 0; // rises on every accepted market event, never resets
   let settingsRevision = 0; // rises on every settings or setup change
   function cachePut(key, entry) {
-    if (analogueCache.size >= ANALOGUE_CACHE_MAX) {
-      // drop the oldest inserted entry that is not the one being refreshed
-      const oldest = analogueCache.keys().next().value;
-      if (oldest !== key) analogueCache.delete(oldest); else analogueCache.delete(analogueCache.keys().next().value);
-    }
+    // Oldest-inserted eviction when the bound is reached (re-setting an existing key refreshes it).
+    if (analogueCache.size >= ANALOGUE_CACHE_MAX) analogueCache.delete(analogueCache.keys().next().value);
     analogueCache.set(key, entry);
   }
   function health() {
     const at = now();
-    return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: MAX_EVENTS, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
+    return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: eventBufferCap, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
   }
   const server = createServer(async (req, res) => {
    try {
@@ -266,7 +264,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       let patternSummary = { recorded: 0 };
       try {
         const results = await patterns.recordMany(signals, simulation.trades, analysis.bars, symbol, intervalMs);
-        patternSummary = { recorded: results.filter(r => r.recorded).length, memory: (await patterns.list()).count };
+        const memoryHealth = await patterns.health();
+        patternSummary = { recorded: results.filter(r => r.recorded).length, memory: memoryHealth.observations, persisted: memoryHealth.persisted };
       } catch (error) { patternSummary = { recorded: 0, error: error.message }; }
       return json(res, 200, { symbol, source, signals: calibrated.slice(-50), latest: calibrated.at(-1) || null, patternMemory: patternSummary, calibration: { method: 'chronological walk-forward historical win rate with Laplace prior', minimumSamples: 30, calibratedSignals: calibrated.filter(s=>s.probability!==null).length }, caveat: 'Технические оценки — это веса правил, а не вероятности. Вероятность показывается только после 30 закрытых сделок в том же направлении.' });
     }
@@ -335,7 +334,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           seenEventIds.add(dedupeKey(stored, stored.eventId));
           seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
-          if (events.length > MAX_EVENTS) events.shift();
+          if (events.length > eventBufferCap) events.shift();
           ingestWatermark += 1;
           const existing = feeds.get(key);
           feeds.set(key,{source:'mt5',symbol:stored.symbol,lastSequence:stored.sequence,receivedAt:Date.parse(stored.receivedAt),accepted:(existing?.accepted||0)+1});
@@ -369,7 +368,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
           seenEventIds.add(dedupeKey(stored, stored.eventId));
           seenEventIds.add(dedupeKey(stored, eventFingerprint(stored)));
           events.push(stored);
-          if (events.length > MAX_EVENTS) events.shift();
+          if (events.length > eventBufferCap) events.shift();
           ingestWatermark += 1;
           const packet = `event: market\ndata: ${JSON.stringify(stored)}\n\n`;
           for (const client of clients) client.write(packet);
@@ -398,7 +397,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       seenEventIds.add(dedupeKey(event, legacyId));
       lastSequence.set(key, event.sequence);
       events.push(stored);
-      if (events.length > MAX_EVENTS) events.shift();
+      if (events.length > eventBufferCap) events.shift();
       ingestWatermark += 1;
       const existing = feeds.get(key);
       feeds.set(key, { source:event.source, symbol:event.symbol, lastSequence:event.sequence, receivedAt, accepted:(existing?.accepted||0)+1 });

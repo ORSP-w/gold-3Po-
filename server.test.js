@@ -306,6 +306,51 @@ test('pattern memory records closed setups once and searches them honestly', asy
   assert.equal((await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&threshold=2')).status, 422);
 });
 
+test('the reference rebuilds when a new tick leaves the event count constant (a full rolling buffer)', async () => {
+  // A tiny buffer cap: once the rolling buffer is full, every new tick evicts an old event, so
+  // the event count stops moving — exactly the production condition under which a count-keyed
+  // cache would serve a stale reference forever. The watermark must still invalidate it.
+  const app = createMarketServer({ token: 'test-secret', storageFile: null, license: testLicense(), setupStore: createSetupStore({ file: null }), settingsStore: createSettingsStore({ file: null }), patternStore: createPatternStore({ file: null }), maxEvents: 60 });
+  const tinyServer = app.server;
+  await new Promise(resolve => tinyServer.listen(0, '127.0.0.1', resolve));
+  const url = 'http://127.0.0.1:' + tinyServer.address().port;
+  try {
+    await ingestHistoryAt(url, sweepFixture());
+    const first = await (await fetch(url + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+    assert.ok(first.reference, 'the fixture must yield a reference signal');
+    const referenceTime = first.reference.signalTime;
+    const countBefore = (await (await fetch(url + '/health')).json()).eventCount;
+    // A new sweep in a closed past bucket: the buffer is at its cap, so the count stays constant
+    // while the ingest watermark moves. The reference must move to the newer signal anyway.
+    const sweepBucket = Math.floor((Date.now() - 2400000) / 900000) * 900000;
+    const seq = Date.now();
+    const sweep = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 60000).toISOString(), sequence: seq, bid: 2644.2, ask: 2644.4, last: 2644.3, tickVolume: 5, realVolume: 5, flags: 64 };
+    const reclaim = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 300000).toISOString(), sequence: seq + 1, bid: 2644.6, ask: 2644.8, last: 2644.7, tickVolume: 5, realVolume: 5, flags: 32 };
+    const quietClose = { source: 'mt5', symbol: 'XAUUSD', timestamp: new Date(sweepBucket + 1000000).toISOString(), sequence: seq + 2, bid: 2644.7, ask: 2644.9, last: 2644.8, tickVolume: 2, realVolume: 2, flags: 0 };
+    for (const tick of [sweep, reclaim, quietClose]) await fetch(url + '/v1/ingest/mt5/tick', { method: 'POST', headers: auth, body: JSON.stringify(tick) });
+    const countAfter = (await (await fetch(url + '/health')).json()).eventCount;
+    assert.equal(countAfter, countBefore, 'fixture: the rolling buffer is at its cap, so the event count does not move');
+    const second = await (await fetch(url + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
+    assert.ok(second.reference, 'the endpoint still yields a reference');
+    assert.notEqual(second.reference.signalTime, referenceTime, 'the reference must rebuild on the watermark alone: a count-keyed cache would serve the stale one forever');
+  } finally { await new Promise(resolve => tinyServer.close(resolve)); }
+});
+
+// Ingest against an explicit base URL, for tests that run their own server instance.
+async function ingestHistoryAt(url, ticks) {
+  for (let i = 0; i < ticks.length; i += 1000) {
+    const r = await fetch(url + '/v1/ingest/mt5/history', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: ticks.slice(i, i + 1000) }) });
+    assert.equal(r.status, 202, 'history batch must be accepted');
+  }
+}
+
+test('the signals route reports whether the pattern memory actually persisted', async () => {
+  await ingestHistory(sweepFixture());
+  const first = await (await fetch(base + '/v1/market/signals?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(first.patternMemory.persisted, true, 'a healthy memory file reports persisted: true');
+  assert.ok(first.patternMemory.recorded > 0);
+});
+
 test('the analogue search reuses its reference between polls and refreshes it on new events', async () => {
   await ingestHistory(sweepFixture());
   // Prime the cache: the first call builds the reference pipeline.
@@ -336,16 +381,19 @@ test('the analogue search reuses its reference between polls and refreshes it on
 
 test('a settings change invalidates the analogue cache, not just new events', async () => {
   await ingestHistory(stackFixture());
-  // Prime the cache under the default footprint settings: the reference's fingerprint includes
-  // the stacked-imbalance axis, which the fixture's stack satisfies.
+  // Prime the cache under the default footprint settings: the reference bar carries the fixture's
+  // 3-level stack, so the reference's stacked axis and stack count are positive.
   const first = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
   assert.ok(first.reference, 'the fixture must yield a reference signal');
+  assert.equal(first.reference.stacked, true, 'the default settings keep the stacked-imbalance axis true');
+  assert.ok(first.reference.stackCount >= 1, 'the reference bar reports its stack');
   // Remove the fixture's stack via a footprint setting: the cached reference must be rebuilt, so
-  // the stacked axis flips and the new reference's fingerprint differs from the stale cached one.
+  // the stacked axis itself flips — a stale cache would keep serving stacked=true.
   await fetch(base + '/v1/settings', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ footprint: { imbalanceLevels: 10 } }) });
   const second = await (await fetch(base + '/v1/patterns/analogues?symbol=XAUUSD&intervalMs=900000')).json();
   assert.ok(second.reference, 'the reference still exists after a settings change');
-  assert.notEqual(second.reference.fingerprint, first.reference.fingerprint, 'a footprint change must rebuild the reference: the fingerprint keeps the stale stacked axis otherwise');
+  assert.equal(second.reference.stacked, false, 'a footprint change must rebuild the reference: the stacked axis keeps its stale true otherwise');
+  assert.equal(second.reference.stackCount, 0, 'the rebuilt reference reports no stacks under the strict setting');
   await fetch(base + '/v1/settings/reset', { method: 'POST' });
 });
 
