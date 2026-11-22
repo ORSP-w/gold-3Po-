@@ -6,6 +6,8 @@ const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
 let bars=[], zones=[], selected=-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
 let levels=[], analysisMeta=null, hasAutoScrolled=false;
+let horizontalZoom=1, verticalZoom=1, chartDrag=null, suppressChartClickUntil=0;
+const chartViewport=chart.parentElement;
 // The user's footprint options (published by settings-client at module init and on every save).
 // The live path recomputes the forming bar with them, so a changed setting shows at once.
 const footprintOptions=()=>window.gold3poSettings?.footprint&&Object.keys(window.gold3poSettings.footprint).length?window.gold3poSettings.footprint:DEFAULT_FOOTPRINT_OPTIONS;
@@ -18,6 +20,60 @@ const zoneLabelText=label=>zoneLabelRu(label);
 function notify(s){toast.textContent=s;toast.classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>toast.classList.remove('visible'),2100);}
 function currentLevels(){if(!live)return levels;const start=Math.max(0,Math.min(Math.max(0,bars.length-24),selected-12)),subset=bars.slice(start,start+24),set=new Set();for(const b of subset)for(const l of b.levels||[])set.add(Number(l.price));return [...set].sort((a,b)=>b-a).slice(0,32);}
 function setEmptyState(empty){if(chartEmpty)chartEmpty.hidden=!empty;}
+const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
+function updateChartZoomControls(){
+ const horizontal=$('#chartZoomReset'),vertical=$('#chartPriceZoomReset');
+ if(horizontal)horizontal.textContent=Math.round(horizontalZoom*100)+'%';
+ if(vertical)vertical.textContent='Y';
+}
+function changeHorizontalZoom(next,anchorClientX=null){
+ const oldWidth=Math.max(1,chart.getBoundingClientRect().width);
+ const rect=chartViewport.getBoundingClientRect();
+ const localX=anchorClientX===null?chartViewport.clientWidth/2:clamp(anchorClientX-rect.left,0,chartViewport.clientWidth);
+ const contentX=chartViewport.scrollLeft+localX;
+ horizontalZoom=clamp(next,0.25,8);
+ renderChart();
+ const newWidth=Math.max(1,chart.getBoundingClientRect().width);
+ chartViewport.scrollLeft=Math.max(0,contentX*newWidth/oldWidth-localX);
+ updateChartZoomControls();
+}
+function changeVerticalZoom(next){verticalZoom=clamp(next,0.25,8);renderChart();updateChartZoomControls();}
+function bindChartNavigation(){
+ if(!chartViewport||chartViewport.dataset.navigationBound==='1')return;
+ chartViewport.dataset.navigationBound='1';
+ chartViewport.addEventListener('wheel',event=>{
+  if(!bars.length)return;
+  event.preventDefault();
+  const factor=event.deltaY<0?1.12:1/1.12;
+  if(event.shiftKey)changeVerticalZoom(verticalZoom*factor);
+  else changeHorizontalZoom(horizontalZoom*factor,event.clientX);
+ },{passive:false});
+ chartViewport.addEventListener('pointerdown',event=>{
+  if(event.button!==0)return;
+  chartDrag={startX:event.clientX,startScrollLeft:chartViewport.scrollLeft,moved:false};
+  chartViewport.classList.add('chart-panning');
+ });
+ window.addEventListener('pointermove',event=>{
+  if(!chartDrag)return;
+  const delta=event.clientX-chartDrag.startX;
+  if(Math.abs(delta)>3)chartDrag.moved=true;
+  if(chartDrag.moved){chartViewport.scrollLeft=chartDrag.startScrollLeft-delta;chartViewport.classList.add('is-dragging');}
+ });
+ const endDrag=()=>{
+  if(chartDrag?.moved)suppressChartClickUntil=performance.now()+250;
+  chartDrag=null;chartViewport.classList.remove('chart-panning','is-dragging');
+ };
+ window.addEventListener('pointerup',endDrag);
+ window.addEventListener('pointercancel',endDrag);
+}
+bindChartNavigation();
+$('#chartZoomOut')?.addEventListener('click',()=>changeHorizontalZoom(horizontalZoom/1.2));
+$('#chartZoomIn')?.addEventListener('click',()=>changeHorizontalZoom(horizontalZoom*1.2));
+$('#chartZoomReset')?.addEventListener('click',()=>{horizontalZoom=1;renderChart();chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();});
+$('#chartPriceZoomOut')?.addEventListener('click',()=>changeVerticalZoom(verticalZoom/1.2));
+$('#chartPriceZoomIn')?.addEventListener('click',()=>changeVerticalZoom(verticalZoom*1.2));
+$('#chartPriceZoomReset')?.addEventListener('click',()=>changeVerticalZoom(1));
+window.addEventListener('resize',()=>renderChart());
 function renderChart(){
  if(!bars.length){chart.innerHTML='';chart.setAttribute('viewBox','0 0 1000 390');chart.style.width='100%';setEmptyState(true);return;}
  setEmptyState(false);
@@ -25,10 +81,12 @@ function renderChart(){
  // The chart fills the panel at any window width (up to 4K) and compresses history into it: a bar
  // may shrink to 3px on a laptop panel and 2px on a 4K one before the series becomes a scroll strip.
  const wrapWidth=Math.max(320,Math.round((chart.parentElement?.clientWidth||960)-16));
- const scale=chartScale({panelWidth:wrapWidth,bars:bars.length,left});
+ const scale=chartScale({panelWidth:wrapWidth,bars:bars.length,left,zoom:horizontalZoom});
  const width=scale.width, step=scale.step, svgWidth=scale.svgWidth;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length){setEmptyState(true);return;}
- const min=Math.min(...allPrices)-1,max=Math.max(...allPrices)+1,x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(2,Math.min(26,step*.62));
+ const rawMin=Math.min(...allPrices),rawMax=Math.max(...allPrices),rawRange=Math.max(0.01,rawMax-rawMin+2),center=(rawMin+rawMax)/2;
+ const visibleRange=rawRange/verticalZoom,min=center-visibleRange/2,max=center+visibleRange/2;
+ const x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(1,Math.min(26,step*.62));
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);
  let html=''; for(let p=Math.ceil(min/gridStep)*gridStep;p<=max;p+=gridStep)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,gridStep<1?2:gridStep<10?1:0)}</text>`;
  if(showZones)for(const z of zones){const top=y(z.high),h=Math.max(4,y(z.low)-y(z.high)),c=z.side==='buy'?'zone-buy':'zone-sell';html+=`<rect x="${left}" y="${top}" width="${width}" height="${h}" class="${c} ${selectedZone===z.id?'selected-zone':''}" opacity="${.08+z.strength*.2}"/><line x1="${left}" y1="${top}" x2="${left+width}" y2="${top}" class="${c}-edge"/>`;}
@@ -41,7 +99,8 @@ function renderChart(){
  if(i%labelStep===0)html+=`<text x="${cx}" y="378" text-anchor="middle" class="time-label">${axisLabel(b)}</text>`;});
  const last=bars.at(-1),py=y(last.c);html+=`<line x1="${left}" y1="${py}" x2="${left+width}" y2="${py}" class="last-price-line"/><rect x="${left+width-2}" y="${py-11}" width="70" height="22" rx="5" class="last-price-tag"/><text x="${left+width+33}" y="${py+4}" text-anchor="middle" class="last-price-text">${fmt(last.c)}</text>`;
  chart.setAttribute('viewBox',`0 0 ${svgWidth} 390`);chart.style.width=svgWidth+'px';chart.innerHTML=html;
- chart.querySelectorAll('.candle').forEach(n=>{const f=()=>select(Number(n.dataset.index));n.addEventListener('click',f);n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f();}});});if(live&&!hasAutoScrolled){chart.parentElement.scrollLeft=chart.parentElement.scrollWidth;hasAutoScrolled=true;}
+ updateChartZoomControls();
+ chart.querySelectorAll('.candle').forEach(n=>{const f=()=>{if(performance.now()<suppressChartClickUntil)return;select(Number(n.dataset.index));};n.addEventListener('click',f);n.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();f();}});});if(live&&!hasAutoScrolled){chartViewport.scrollLeft=chartViewport.scrollWidth;hasAutoScrolled=true;}
 }
 function renderZones(){
  const buyCount=zones.filter(z=>z.side==='buy').length,sellCount=zones.filter(z=>z.side==='sell').length;
@@ -173,8 +232,8 @@ function select(i){
 $('#zonesToggle').addEventListener('click',e=>{showZones=!showZones;e.currentTarget.setAttribute('aria-pressed',String(showZones));e.currentTarget.classList.toggle('is-off',!showZones);renderChart();notify(showZones?'Зоны ликвидности показаны':'Зоны ликвидности скрыты');});
 $('#numbersToggle').addEventListener('click',e=>{showNumbers=!showNumbers;e.currentTarget.setAttribute('aria-pressed',String(showNumbers));renderFootprint();});
 $('#footprintModes').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;$('#footprintModes').querySelectorAll('button').forEach(x=>x.classList.toggle('selected',x===b));renderFootprint();}));
-$('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);notify('Вид сброшен');});
-$('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
+$('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';horizontalZoom=1;verticalZoom=1;selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();notify('Вид сброшен');});
+$('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');renderChart();notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
 // A streamed tick updates the forming bar in place: the last footprint column and the last
 // candle move between authoritative refetches instead of waiting for the next 1.5 s poll.
 let liveFrame=0,liveRenderedAt=0;

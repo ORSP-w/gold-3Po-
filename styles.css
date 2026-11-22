@@ -275,3 +275,15 @@ html[data-theme="glass-light"]{--v-accent:#d9a273;--v-cta-ink:#1a1611}
 .pattern-row .win{color:var(--cyan)}
 .pattern-row .loss{color:var(--red)}
 @media(max-width:700px){.pattern-actions{flex-direction:column;align-items:stretch}.pattern-threshold{min-width:0}}
+
+
+/* Chart navigation: X/Y zoom, wheel scaling and drag-to-pan. */
+.chart-zoom-controls{padding:2px;gap:1px;flex:none}
+.chart-zoom-controls button{min-width:23px;padding:4px 5px;font-size:8px;line-height:1}
+.chart-zoom-controls #chartZoomReset{min-width:38px;color:var(--gold)}
+.chart-zoom-controls #chartPriceZoomReset{min-width:24px;color:var(--gold)}
+.price-chart-wrap{cursor:grab;touch-action:pan-y}
+.price-chart-wrap.chart-panning{user-select:none;-webkit-user-select:none}
+.price-chart-wrap.is-dragging{cursor:grabbing}
+.price-chart-wrap.is-dragging .candle{pointer-events:none}
+@media(max-width:850px){.chart-zoom-controls button{min-width:20px;padding:4px 4px}.chart-zoom-controls #chartZoomReset{min-width:33px}}

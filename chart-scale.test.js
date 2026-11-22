@@ -48,6 +48,28 @@ test('an empty series still fills the panel', () => {
   assert.equal(s.step, s.pane);
 });
 
+test('zoom-in enlarges candle pitch and chart width', () => {
+  const normal = chartScale({ panelWidth: 1996, bars: 2880 });
+  const zoomed = chartScale({ panelWidth: 1996, bars: 2880, zoom: 2 });
+  assert.equal(normal.step, 2);
+  assert.equal(zoomed.step, 4);
+  assert.equal(zoomed.width, normal.width * 2);
+});
+
+test('zoom-out compresses dense history but keeps the plot at least panel width', () => {
+  const normal = chartScale({ panelWidth: 1996, bars: 2880 });
+  const zoomedOut = chartScale({ panelWidth: 1996, bars: 2880, zoom: 0.5 });
+  assert.ok(zoomedOut.step < normal.step);
+  assert.ok(zoomedOut.width >= zoomedOut.pane);
+  assert.ok(zoomedOut.width < normal.width);
+});
+
+test('zoom limits reject invalid values', () => {
+  assert.throws(() => chartScale({ panelWidth: 1200, bars: 100, zoom: 0.1 }), /zoom/);
+  assert.throws(() => chartScale({ panelWidth: 1200, bars: 100, zoom: 9 }), /zoom/);
+  assert.throws(() => chartScale({ panelWidth: 1200, bars: 100, zoom: Number.NaN }), /zoom/);
+});
+
 test('invalid input is rejected', () => {
   assert.throws(() => chartScale({ panelWidth: 0, bars: 10 }), /panelWidth/);
   assert.throws(() => chartScale({ panelWidth: Number.NaN, bars: 10 }), /panelWidth/);

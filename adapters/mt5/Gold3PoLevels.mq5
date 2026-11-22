@@ -262,9 +262,9 @@ bool ParseStyle(const string line, GoldStyle &style)
    if(StringSplit(line, ',', f) != 8 || f[0] != "STYLE")
       return false;
    color buy = clrRed, sell = clrRed;
-   ENUM_LINE_STYLE line = STYLE_SOLID;
+   ENUM_LINE_STYLE parsedStyle = STYLE_SOLID;
    bool fill = false, labels = true, strength = true;
-   if(!HexColor(f[1], buy) || !HexColor(f[2], sell) || !LineStyleToken(f[3], line))
+   if(!HexColor(f[1], buy) || !HexColor(f[2], sell) || !LineStyleToken(f[3], parsedStyle))
       return false;
    if(!UnsignedDecimal(f[4], 1, width) || width < 1 || width > 5)
       return false;
@@ -272,8 +272,8 @@ bool ParseStyle(const string line, GoldStyle &style)
       return false;
    style.buy = buy;
    style.sell = sell;
-   style.line = line;
-   style.width = line == STYLE_SOLID ? (int)width : 1;
+   style.line = parsedStyle;
+   style.width = parsedStyle == STYLE_SOLID ? (int)width : 1;
    style.fill = fill;
    style.labels = labels;
    style.strength = strength;

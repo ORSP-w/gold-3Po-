@@ -147,7 +147,11 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!Number.isInteger(intervalMs) || intervalMs < 60000 || intervalMs > 86400000) return json(res,400,{error:'invalid_interval',message:'intervalMs must be an integer between 60000 and 86400000.'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 10000, zoneOptions: current.zones, footprintOptions: current.footprint });
-      return json(res, 200, { symbol, source, intervalMs, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones: analysis.zones, style: current.mt5, generatedAt: new Date(now()).toISOString() });
+      const zones = analysis.zones.map(zone => ({
+        id: zone.id, side: zone.side, low: zone.low, high: zone.high,
+        strength: zone.strength, label: zone.label, distance: zone.distance, state: zone.state
+      }));
+      return json(res, 200, { symbol, source, intervalMs, lastPrice: analysis.bars.length ? analysis.bars.at(-1).c : null, zones, style: current.mt5, generatedAt: new Date(now()).toISOString() });
     }
     if (url.pathname === '/v1/settings' || url.pathname === '/v1/settings/reset') {
       try {

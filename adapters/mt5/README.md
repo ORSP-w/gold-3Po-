@@ -21,15 +21,17 @@ The Expert Advisor (EA) runs inside the user's logged-in MetaTrader 5 terminal. 
 2. In MT5, open **Tools → Options → Expert Advisors → Allow WebRequest for listed URL** and add `http://127.0.0.1:8787`.
 3. Open the installed file `resources\adapters\mt5\Gold3PoBridge.mq5` in MetaEditor and compile with F7.
 4. Copy the ingest token from the app: **⚙ Настройки → Отрисовка в MT5 → Мост MT5 → «Скопировать»**. The same value lives in `%APPDATA%\GOLD-3Po Market Lab\settings.json` (`marketIngestToken`) if you ever need it from disk; it is created once and does not change between launches.
-5. Attach the EA to the broker's XAUUSD chart and paste the copied value into the EA input `IngestToken`.
-6. Check `http://127.0.0.1:8787/health` for the MT5 feed and `http://127.0.0.1:8787/v1/market/analysis?symbol=XAUUSD&intervalMs=900000` for calculated bars.
+5. Attach **one** EA instance to one XAUUSD chart and paste the copied value into `IngestToken`. Duplicate H1/H4/M15 instances on the same symbol will refuse to start.
+6. Keep `AppConnectionFeedsLive=true` (default) when the desktop MT5 connection is active: the app owns the latest ~8 hours and live stream; the EA backfills older history and draws zones. Set it to `false` only when the EA must be the sole live quote source.
+7. Check `http://127.0.0.1:8787/health` and the MT5 Experts tab for the preflight result.
 
 ## Data flow and recovery
 
-- At startup the EA schedules up to 90 days (30 by default) of broker tick history using hourly `CopyTicksRange` windows. Backfill runs asynchronously from the MT5 timer, one batch of up to 1,000 ticks per cycle, so the terminal becomes responsive immediately and live events are sent first.
-- Each historical tick has a deterministic event identity. The API stores historical events independently from the live sequence counter and de-duplicates repeated history uploads. Restarting the EA therefore does not cause historical sequence numbers to block live quotes.
-- If a history request or upload fails, the EA retains the current batch and retries with exponential backoff; after repeated failures it waits `HistoryRetryMinutes` (15 by default). Live collection and delivery have priority over backfill.
-- Live events are captured in `OnTick`, assigned atomically reserved per-symbol sequence numbers and buffered in memory. The timer flushes batches of up to 1,000 ticks to `/v1/ingest/mt5/live-batch`. Failed batches stay queued for retry. The buffer is capped at 20,000 ticks; a longer outage can overflow it and the EA logs that condition.
+- At startup the EA schedules up to 90 days (30 by default) of broker tick history using hourly `CopyTicksRange` windows. With the desktop feed enabled, backfill stops 8 hours before now so it does not duplicate the recent ticks already supplied by the app.
+- The EA is single-instance per symbol (terminal-global lock); attach it once, not to H1/H4/M15 simultaneously. A second instance exits with an explicit Experts-tab message.
+- Historical upload defaults to 200 ticks per batch with a 15-second request timeout. On WebRequest transport failure the batch is reduced (down to 50) and retried with backoff.
+- By default `AppConnectionFeedsLive=true`: the desktop connector owns recent/live ticks; the EA owns deep historical backfill and optional zone drawing. Set it to `false` only when the EA alone should send live quotes.
+- When standalone live delivery is enabled, ticks remain queued through HTTP errors and retry with backoff. The queue is capped at 20,000 ticks.
 - The terminal must remain open and connected. MT5 WebRequest is synchronous; a slow API can delay the EA's event processing. The local API binds only to loopback.
 - API events are appended to `%APPDATA%\GOLD-3Po Market Lab\market-events.jsonl` and reloaded after application restart.
 - The calculation API builds 15-minute OHLC bars and price-level activity. The chart supports historical replay; the footprint follows the selected candle.
@@ -40,13 +42,14 @@ RoboForex XAUUSD is an OTC/CFD instrument, not centralized COMEX futures. The EA
 
 The 30-day history request means “up to the history available from the broker and terminal”. It cannot guarantee a complete month of ticks. Check the available event count, gaps and feed age before interpreting a chart as complete.
 
-## Live liquidity-zone drawing (v2.10)
+## Live liquidity-zone drawing (v2.20)
 
 With `DrawZones=true` (default) the EA polls `GET /v1/chart/zones?symbol=XAUUSD` every `ZonesRefreshSeconds` (default 5) and redraws the detected liquidity zones on the chart:
 
 - Zones above price (buy-side) and below price (sell-side) are drawn as rectangles in the colours, line style, width and fill chosen in the app (**Settings → Отрисовка в MT5**; default red solid lines). Set `UseAppStyle=false` to use the EA inputs (`BuyZoneColor`, `SellZoneColor`, `ZoneLineStyle`, `ZoneLineWidth`) instead.
 - Each rectangle spans `ZoneLookbackBars` (default 200) of history into the near future and carries a label `side LQ strength distance` plus a tooltip.
 - A status line in the top-left corner shows zone counts and the last refresh time.
+- The MT5 zones route returns only flat drawing fields (`id`, `side`, bounds, strength, label, distance and state). Full reaction/source/factor detail remains in the desktop analysis API; the flat shape avoids the EA's lightweight parser stopping at nested JSON.
 - Zones are rebuilt from the latest market analysis on every refresh, so they **follow the market**: new repeated levels appear, consumed levels disappear.
 - All objects use the `G3P_` prefix and are removed when the EA is detached.
 - If the licence is missing/expired (`402`), the EA clears the zones and shows a licence-required notice; tick ingestion continues regardless.

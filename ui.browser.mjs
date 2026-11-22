@@ -59,6 +59,17 @@ try {
   assert.ok(await page.locator('.candle').count() >= 30, 'live chart should render the ingested 30-day broker history');
   assert.equal(await page.locator('#chartEmpty').isHidden(), true, 'empty state must disappear once broker data arrives');
   assert.ok(await page.locator('.zone-row').count() > 0, 'liquidity zones should appear once broker history arrives');
+  const chartWidthBeforeZoom=await page.locator('#priceChart').evaluate(el=>el.getBoundingClientRect().width);
+  await page.locator('#chartZoomIn').click();
+  const chartWidthAfterZoom=await page.locator('#priceChart').evaluate(el=>el.getBoundingClientRect().width);
+  assert.ok(chartWidthAfterZoom>chartWidthBeforeZoom,'X zoom must enlarge candle spacing and chart width');
+  await page.locator('#chartZoomReset').click();
+  const priceTagBeforeZoom=await page.locator('.last-price-tag').getAttribute('y');
+  await page.locator('#chartPriceZoomIn').click();
+  const priceTagAfterZoom=await page.locator('.last-price-tag').getAttribute('y');
+  assert.notEqual(priceTagAfterZoom,priceTagBeforeZoom,'Y zoom must change the price projection');
+  await page.locator('#chartPriceZoomReset').click();
+  await page.locator('#chartZoomReset').click();
   const zoneTally = await page.evaluate(() => {
     const num = t => Number((t || '').replace(/[^\d]/g, ''));
     return {

@@ -524,6 +524,7 @@ void RefreshZones()
 
 void OnTick()
 {
+   if(AppConnectionFeedsLive) return; // The desktop connector already sends the live feed.
    MqlTick tick;
    if(!SymbolInfoTick(_Symbol, tick) || tick.bid <= 0 || tick.ask < tick.bid) return;
    int queued = ArraySize(pendingTicks);
@@ -549,8 +550,82 @@ void OnTick()
    if(queued == 0) queueLimitLogged = false;
 }
 
+bool AcquireBridgeLock()
+{
+   g_bridgeLockKey = "G3P_BRIDGE_LOCK_" + _Symbol;
+   if(!GlobalVariableCheck(g_bridgeLockKey)) GlobalVariableTemp(g_bridgeLockKey);
+   if(!GlobalVariableCheck(g_bridgeLockKey))
+   {
+      Print("GOLD-3Po: could not create the per-symbol Bridge lock.");
+      return false;
+   }
+   double previous = GlobalVariableGet(g_bridgeLockKey);
+   double now = (double)TimeGMT();
+   if(previous > 0 && now - previous < 120)
+   {
+      Print("GOLD-3Po: another Bridge instance already owns ", _Symbol, ". Keep one Gold3PoBridge on this symbol; this copy will stop.");
+      return false;
+   }
+   if(!GlobalVariableSetOnCondition(g_bridgeLockKey, now, previous))
+   {
+      Print("GOLD-3Po: another chart acquired the ", _Symbol, " Bridge lock. Remove duplicate Gold3PoBridge instances.");
+      return false;
+   }
+   g_bridgeLockStamp = now;
+   g_nextBridgeLockRefreshAt = GetTickCount64() + 30000;
+   return true;
+}
+
+bool RefreshBridgeLock()
+{
+   double now = (double)TimeGMT();
+   if(!GlobalVariableSetOnCondition(g_bridgeLockKey, now, g_bridgeLockStamp)) return false;
+   g_bridgeLockStamp = now;
+   g_nextBridgeLockRefreshAt = GetTickCount64() + 30000;
+   return true;
+}
+
+void ReleaseBridgeLock()
+{
+   if(g_bridgeLockKey != "" && g_bridgeLockStamp > 0 && GlobalVariableCheck(g_bridgeLockKey))
+      GlobalVariableSetOnCondition(g_bridgeLockKey, 0.0, g_bridgeLockStamp);
+   g_bridgeLockStamp = 0.0;
+}
+
+bool CheckLocalApi()
+{
+   char data[], result[];
+   ArrayResize(data, 0);
+   string responseHeaders;
+   ResetLastError();
+   int status = WebRequest("GET", HealthUrl, "", RequestTimeoutMs, data, result, responseHeaders);
+   int requestError = GetLastError();
+   string body = ArraySize(result) > 0 ? CharArrayToString(result, 0, WHOLE_ARRAY, CP_UTF8) : "";
+   if(status != 200 || StringFind(body, "\"status\":\"ok\"") < 0)
+   {
+      Print("GOLD-3Po: local API preflight failed. status=", status, " MQL5 error=", requestError, " URL=", HealthUrl);
+      if(requestError == 5203 || requestError == 4014)
+         Print("GOLD-3Po: start GOLD-3Po first and allow http://127.0.0.1:8787 in MT5 Tools > Options > Expert Advisors > WebRequest.");
+      else if(status >= 400 && body != "")
+         Print("GOLD-3Po: API health response: ", StringSubstr(body, 0, 240));
+      return false;
+   }
+   return true;
+}
 int OnInit()
 {
+   if(StringLen(IngestToken) < 24)
+   {
+      Print("GOLD-3Po: IngestToken is missing or too short. Copy it from GOLD-3Po > Settings > Отрисовка в MT5 > Мост MT5.");
+      return INIT_PARAMETERS_INCORRECT;
+   }
+   if(!AcquireBridgeLock()) return INIT_FAILED;
+   if(!CheckLocalApi())
+   {
+      ReleaseBridgeLock();
+      return INIT_FAILED;
+   }
+   g_effectiveHistoryBatchSize = MathMax(50, MathMin(HistoryBatchSize, 1000));
    sequenceKey = "G3P_SEQ_" + _Symbol;
    ulong epochSeed = (ulong)TimeGMT() * 1000;
    if(!GlobalVariableCheck(sequenceKey)) GlobalVariableSet(sequenceKey, (double)epochSeed);
@@ -561,23 +636,29 @@ int OnInit()
       storedSequence = GlobalVariableGet(sequenceKey);
    }
    sequenceNumber = (ulong)storedSequence;
-   if(StringLen(IngestToken) < 24)
+   if(!SymbolSelect(_Symbol, true))
    {
-      Print("GOLD-3Po: set an ingest token of at least 24 characters.");
-      return INIT_PARAMETERS_INCORRECT;
+      ReleaseBridgeLock();
+      return INIT_FAILED;
    }
-   if(!SymbolSelect(_Symbol, true)) return INIT_FAILED;
    StartHistorySync();
    nextHistoryRetryAt = GetTickCount64();
    nextZonesRefreshAt = GetTickCount64() + 2000;
-   EventSetMillisecondTimer(MathMax(100, MinIntervalMs));
-   Print("GOLD-3Po bridge ready for ", _Symbol, ". Live quotes, asynchronous history sync and zone drawing enabled.");
+   g_nextLiveRetryAt = GetTickCount64();
+   if(!EventSetMillisecondTimer(MathMax(250, MinIntervalMs)))
+   {
+      Print("GOLD-3Po: could not start the MT5 bridge timer. Error=", GetLastError());
+      ReleaseBridgeLock();
+      return INIT_FAILED;
+   }
+   Print("GOLD-3Po bridge ready for ", _Symbol, ". One instance owns history and zone drawing; AppConnectionFeedsLive=", AppConnectionFeedsLive, ".");
    return INIT_SUCCEEDED;
 }
 
 void OnDeinit(const int reason)
 {
    EventKillTimer();
+   ReleaseBridgeLock();
    DeleteZoneObjects();
    ChartRedraw(0);
 }
@@ -585,10 +666,27 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    ulong nowMs = GetTickCount64();
-   if(ArraySize(pendingTicks) > 0)
+   if(nowMs >= g_nextBridgeLockRefreshAt && !RefreshBridgeLock())
+   {
+      Print("GOLD-3Po: Bridge lock was lost for ", _Symbol, ". This duplicate instance will stop.");
+      ExpertRemove();
+      return;
+   }
+   if(!AppConnectionFeedsLive && ArraySize(pendingTicks) > 0 && nowMs >= g_nextLiveRetryAt)
    {
       if(!FlushLiveBatch())
-         Print("GOLD-3Po: pending live tick batch retained for retry. History and zones continue independently.");
+      {
+         g_liveFailures++;
+         int exponent = MathMin(g_liveFailures - 1, 5);
+         ulong delayMs = (ulong)MathMin(60000, 1000 * (1 << exponent));
+         g_nextLiveRetryAt = nowMs + delayMs;
+         Print("GOLD-3Po: pending live ticks retained; next retry in ", delayMs / 1000, " s.");
+      }
+      else
+      {
+         g_liveFailures = 0;
+         g_nextLiveRetryAt = nowMs;
+      }
    }
    if(!historySynchronized && nowMs >= nextHistoryRetryAt)
       ProcessHistorySync();
