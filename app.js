@@ -52,9 +52,8 @@ function bindChartNavigation(){
   if(event.button!==0)return;
   chartDrag={startX:event.clientX,startScrollLeft:chartViewport.scrollLeft,moved:false};
   chartViewport.classList.add('chart-panning');
-  try{chartViewport.setPointerCapture(event.pointerId);}catch{}
  });
- chartViewport.addEventListener('pointermove',event=>{
+ window.addEventListener('pointermove',event=>{
   if(!chartDrag)return;
   const delta=event.clientX-chartDrag.startX;
   if(Math.abs(delta)>3)chartDrag.moved=true;
@@ -64,8 +63,8 @@ function bindChartNavigation(){
   if(chartDrag?.moved)suppressChartClickUntil=performance.now()+250;
   chartDrag=null;chartViewport.classList.remove('chart-panning','is-dragging');
  };
- chartViewport.addEventListener('pointerup',endDrag);
- chartViewport.addEventListener('pointercancel',endDrag);
+ window.addEventListener('pointerup',endDrag);
+ window.addEventListener('pointercancel',endDrag);
 }
 bindChartNavigation();
 $('#chartZoomOut')?.addEventListener('click',()=>changeHorizontalZoom(horizontalZoom/1.2));
