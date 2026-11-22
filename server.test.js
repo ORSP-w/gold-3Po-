@@ -190,6 +190,12 @@ test('chart zones follow the settings and carry the MT5 drawing style',async()=>
   let b=await (await fetch(base+'/v1/chart/zones?symbol=XAUUSD')).json();
   assert.equal(b.intervalMs,900000);
   assert.ok(b.zones.length>=3&&b.zones.length<=7,'default finds 3..7 zones, got '+b.zones.length);
+  const eaFields=['distance','high','id','label','low','side','state','strength'];
+  for(const zone of b.zones){
+    assert.deepEqual(Object.keys(zone).sort(),eaFields,'MT5 zones payload must be flat for the MQL5 parser');
+    assert.ok(['buy','sell'].includes(zone.side));
+    assert.ok(Number.isFinite(zone.low)&&Number.isFinite(zone.high)&&zone.high>zone.low);
+  }
   assert.equal(b.style.buyColor,'#FF0000');
   await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({zones:{minZones:2,maxZones:3,timeframeMinutes:30},mt5:{fill:true}})});
   b=await (await fetch(base+'/v1/chart/zones?symbol=XAUUSD')).json();
