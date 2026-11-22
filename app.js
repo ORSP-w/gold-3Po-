@@ -234,7 +234,7 @@ $('#zonesToggle').addEventListener('click',e=>{showZones=!showZones;e.currentTar
 $('#numbersToggle').addEventListener('click',e=>{showNumbers=!showNumbers;e.currentTarget.setAttribute('aria-pressed',String(showNumbers));renderFootprint();});
 $('#footprintModes').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;$('#footprintModes').querySelectorAll('button').forEach(x=>x.classList.toggle('selected',x===b));renderFootprint();}));
 $('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';horizontalZoom=1;verticalZoom=1;selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();notify('Вид сброшен');});
-$('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
+$('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');renderChart();notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
 // A streamed tick updates the forming bar in place: the last footprint column and the last
 // candle move between authoritative refetches instead of waiting for the next 1.5 s poll.
 let liveFrame=0,liveRenderedAt=0;
