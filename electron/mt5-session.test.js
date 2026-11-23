@@ -14,7 +14,7 @@ test('snapshot format matches the indicator contract', () => {
   const text = encodeSnapshot('XAUUSDm', [{ ...zone, label: 'Repeated swing lows · role flip' }], 1795000000000);
   const lines = text.split('\r\n');
   assert.equal(lines[0], 'G3P2,1795000000,XAUUSDm,1');
-  assert.equal(lines[1], 'STYLE,#FF0000,#FF0000,SOLID,2,0,1,1', 'default: red solid lines, width 2');
+  assert.equal(lines[1], 'STYLE,#99FFE4,#FF8080,SOLID,2,1,1,1', 'default: distinct cyan/red filled zones with labels and strength');
   assert.equal(lines[2], 'LQ-buy-12.05,buy-side,11.9,12.2,0.69,НЕ ПРОВЕРЕНА,Повторный минимум - смена роли');
   assert.equal(lines[3], 'END');
   assert.equal(encodeSnapshot('XAUUSD', []).split('\r\n')[0], 'G3P2,' + Math.floor(Date.now() / 1000) + ',XAUUSD,0');
