@@ -195,3 +195,21 @@ test('cumulative delta that disagrees with price is a divergence, noise is not',
   assert.equal(cumulativeDivergence(noise).side, null, 'agreeing price and delta is not a divergence');
   assert.equal(cumulativeDivergence([bar(100, 101, 1, 1)]).side, null);
 });
+
+test('each footprint display mode shows a value taken from the row itself', async () => {
+  const { footprintCell, FOOTPRINT_MODES } = await import('./footprint-engine.js');
+  const row = { bid: 3, ask: 9, unknown: 2 };
+  assert.deepEqual(footprintCell(row, 'bidask'), { text: '3 9', tone: 'positive', value: null });
+  assert.deepEqual(footprintCell(row, 'delta'), { text: '+6', tone: 'positive', value: 6 });
+  assert.deepEqual(footprintCell(row, 'deltaPct'), { text: '+50%', tone: 'positive', value: 50 }, 'delta share of the volume with a known side');
+  assert.deepEqual(footprintCell(row, 'volume'), { text: '14', tone: 'neutral', value: 14 }, 'total includes unclassified ticks');
+  assert.deepEqual(footprintCell(row, 'buy'), { text: '9', tone: 'positive', value: 9 });
+  assert.deepEqual(footprintCell(row, 'sell'), { text: '3', tone: 'negative', value: 3 });
+  assert.equal(footprintCell({ bid: 5, ask: 1, unknown: 0 }, 'deltaPct').text, '-67%');
+  // Only unclassified ticks: side-based modes stay empty instead of inventing a split.
+  const unknownOnly = { bid: 0, ask: 0, unknown: 7 };
+  for (const mode of ['delta', 'deltaPct', 'buy', 'sell']) assert.equal(footprintCell(unknownOnly, mode).text, '', mode);
+  assert.equal(footprintCell(unknownOnly, 'volume').text, '7');
+  for (const mode of FOOTPRINT_MODES) assert.equal(footprintCell({ bid: 0, ask: 0, unknown: 0 }, mode).text, '', 'an empty row shows nothing in ' + mode);
+  assert.throws(() => footprintCell(row, 'heatmap'), /Unknown footprint mode/);
+});

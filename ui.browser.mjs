@@ -96,6 +96,26 @@ try {
   assert.ok(await page.locator('.delta-positive, .delta-negative').count() > 0, 'Delta mode should render delta cells');
   await page.locator('#footprintModes [data-mode="volume"]').click();
   assert.ok(await page.locator('.volume-cell').count() > 0, 'Volume mode should render volume cells');
+  // Delta %, buy and sell: each mode really switches what the cells show. The history above has no
+  // aggressor side, so the side modes are rightly empty there; a few classified live ticks give them data.
+  await page.evaluate(() => {
+    const tick = (last, side, volume) => window.dispatchEvent(new CustomEvent('market-tick', { detail: { timestamp: new Date().toISOString(), last, aggressorSide: side, tickVolume: volume, realVolume: 0 } }));
+    tick(2648.5, 'buy', 9); tick(2648.5, 'sell', 3); tick(2648.6, 'sell', 7); tick(2648.6, 'buy', 2);
+  });
+  await page.waitForTimeout(500);
+  await page.locator('#resetView').click();
+  await page.waitForTimeout(300);
+  const cellTexts = () => page.evaluate(() => [...document.querySelectorAll('#footprintGrid .foot-cell')].map(node => node.textContent.replace(/[◆\s\u00a0]/g, '')).filter(Boolean));
+  await page.locator('#footprintModes [data-mode="deltaPct"]').click();
+  const pctTexts = await cellTexts();
+  assert.ok(pctTexts.includes('+50%') && pctTexts.includes('-56%') && pctTexts.every(text => /^[+-]?\d+%$/.test(text)), 'Delta % mode shows each row as a share of its sided volume: ' + pctTexts.slice(0, 8).join(' '));
+  assert.ok(await page.locator('#footprintModes [data-mode="deltaPct"].selected').count() === 1, 'the Delta % button is marked selected');
+  await page.locator('#footprintModes [data-mode="buy"]').click();
+  const buyTexts = await cellTexts();
+  await page.locator('#footprintModes [data-mode="sell"]').click();
+  const sellTexts = await cellTexts();
+  assert.ok(buyTexts.includes('9') && buyTexts.includes('2') && sellTexts.includes('3') && sellTexts.includes('7'), 'buy shows the ask side and sell the bid side: ' + buyTexts.join(' ') + ' / ' + sellTexts.join(' '));
+  assert.notDeepEqual(buyTexts, sellTexts, 'buy and sell modes show different sides of the rows');
   await page.locator('#footprintModes [data-mode="bidask"]').click();
   await page.locator('#numbersToggle').click();
   assert.ok(await page.locator('.foot-cell').first().innerText().then(v => v.trim()).then(v => v === ''), 'number toggle should hide cell values');

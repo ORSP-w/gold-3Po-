@@ -317,3 +317,27 @@ export function cumulativeDivergence(bars, { lookback = 20, minDeltaShare = 0.05
   if (priceChange < 0 && deltaChange > 0) return { side: 'bullish', priceChange, deltaChange, window: window.length };
   return { side: null, priceChange, deltaChange, window: window.length };
 }
+
+// What one footprint cell shows in each display mode. Every value comes from the same price row; a
+// mode never invents a number the row does not hold. Without a known aggressor (only unclassified
+// ticks) the side-based modes show nothing rather than a fake split.
+export const FOOTPRINT_MODES = Object.freeze(['bidask', 'delta', 'deltaPct', 'volume', 'buy', 'sell']);
+export function footprintCell(row, mode) {
+  if (!FOOTPRINT_MODES.includes(mode)) throw new TypeError('Unknown footprint mode: ' + mode);
+  const bid = Number(row?.bid) || 0, ask = Number(row?.ask) || 0, unknown = Number(row?.unknown) || 0;
+  const total = bid + ask + unknown, sided = bid + ask, delta = ask - bid;
+  const tone = delta > 0 ? 'positive' : delta < 0 ? 'negative' : 'neutral';
+  if (total <= 0) return { text: '', tone: 'neutral', value: null };
+  switch (mode) {
+    case 'bidask': return { text: sided ? `${bid} ${ask}` : '·', tone, value: null };
+    case 'delta': return { text: sided ? (delta > 0 ? '+' : '') + delta : '', tone, value: sided ? delta : null };
+    case 'deltaPct': {
+      if (!sided) return { text: '', tone: 'neutral', value: null };
+      const pct = Math.round(100 * delta / sided);
+      return { text: (pct > 0 ? '+' : '') + pct + '%', tone, value: pct };
+    }
+    case 'volume': return { text: String(total), tone: 'neutral', value: total };
+    case 'buy': return { text: ask ? String(ask) : '', tone: ask ? 'positive' : 'neutral', value: ask };
+    case 'sell': return { text: bid ? String(bid) : '', tone: bid ? 'negative' : 'neutral', value: bid };
+  }
+}

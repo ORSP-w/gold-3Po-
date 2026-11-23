@@ -1,5 +1,5 @@
 import { barDelta, totalVolume } from './market-data.js';
-import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
+import { footprintOf, footprintCell, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
 import { chartScale } from './chart-scale.js';
 const $ = s => document.querySelector(s);
@@ -166,6 +166,7 @@ function renderFootprint(){
   if(mode==='bidask'){content=showNumbers&&total?`<span>${v.unknown&&!v.bid&&!v.ask?'·':v.bid}</span><span>${v.unknown&&!v.bid&&!v.ask?'·':v.ask}</span>`:'';cls='bidask';}
   if(mode==='delta'){content=showNumbers?(total?((delta>0?'+':'')+delta):''):'';cls=delta>=0?'delta-positive':'delta-negative';}
   if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
+  if(mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
   if(imbalance)cls+=' imbalance-'+imbalance;
   if(isPoc)cls+=' foot-poc';
   if(inVa)cls+=' foot-va';
