@@ -50,6 +50,17 @@ string TickStamp(const long timeMsc)
    return stamp + StringFormat(".%03dZ", (int)(timeMsc % 1000));
 }
 
+// Use the broker's real price grid for both historical and live batches. Explicit null clears
+// a stale specification when neither trade tick size nor point is available.
+string BrokerSpecJson()
+{
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(step <= 0) step = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   if(step > 0 && step <= 100)
+      return "\"spec\":{\"tickSize\":" + DoubleToString(step, 8) + "},";
+   return "\"spec\":null,";
+}
+
 int PostJson(const string url, const string body, string &response)
 {
    response = "";
@@ -85,7 +96,7 @@ long JsonLong(const string json, const string key)
 
 bool SendHistoryBatch(MqlTick &ticks[], const int first, const int count, ulong &historySequence, string &response)
 {
-   string body = "{\"source\":\"mt5\",\"symbol\":\"" + _Symbol + "\",\"ticks\":[";
+   string body = "{\"source\":\"mt5\",\"symbol\":\"" + _Symbol + "\"," + BrokerSpecJson() + "\"ticks\":[";
    for(int i=0; i<count; i++)
    {
       MqlTick tick = ticks[first+i];
