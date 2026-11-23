@@ -69,6 +69,31 @@ test('three imbalanced levels in a row make a stack, two do not', () => {
   assert.deepEqual(pair.stackedImbalances, [], 'two levels are not a stack');
 });
 
+test('imbalance compares neighbouring price steps, not neighbouring array rows', () => {
+  // 103 never traded, so 104 and 102 are two steps apart: there is no diagonal pair to compare.
+  const gapped = footprintOf(rows([[104, 1, 12], [102, 2, 1]]), { h: 104, l: 102, c: 103, priceStep: 1 });
+  assert.deepEqual(gapped.imbalances, [], 'rows two steps apart must not be compared as neighbours');
+  const adjacent = footprintOf(rows([[104, 1, 12], [103, 2, 1]]), { h: 104, l: 103, c: 103, priceStep: 1 });
+  assert.equal(adjacent.imbalances.filter(item => item.side === 'buy').length, 1, 'the same rows one step apart are compared');
+  // The step is taken from the rows when the caller does not pass it.
+  const inferred = footprintOf(rows([[104, 1, 12], [103.5, 1, 1], [102, 2, 1]]), { h: 104, l: 102, c: 103 });
+  assert.ok(!inferred.imbalances.some(item => item.price === 103.5 && item.side === 'buy'), 'with a 0.5 step, 103.5 and 102 are not neighbours');
+});
+
+test('a stack is broken by an untraded price step', () => {
+  const split = footprintOf(rows([[107, 1, 10], [106, 1, 10], [104, 1, 10], [103, 1, 1]]), { h: 107, l: 103, c: 105, priceStep: 1 });
+  assert.deepEqual(split.stackedImbalances, [], '107, 106 and 104 are not three consecutive steps');
+  const whole = footprintOf(rows([[107, 1, 10], [106, 1, 10], [105, 1, 10], [104, 1, 1]]), { h: 107, l: 104, c: 106, priceStep: 1 });
+  assert.deepEqual(whole.stackedImbalances[0].prices, [107, 106, 105]);
+});
+
+test('volume without a known aggressor never creates absorption on its own', () => {
+  const unknown = footprintOf([{ price: 104, bid: 0, ask: 0, unknown: 40 }, ...rows([[103, 2, 2], [102, 2, 2]])], { h: 104, l: 102, c: 103 });
+  assert.deepEqual(unknown.absorbedLevels, [], 'unclassified broker ticks cannot prove absorption');
+  const known = footprintOf(rows([[104, 20, 20], [103, 2, 2], [102, 2, 2]]), { h: 104, l: 102, c: 103 });
+  assert.equal(known.absorbedLevels.length, 1, 'the same row with a known aggressor is still flagged');
+});
+
 test('an unfinished auction is an extreme that still shows both sides', () => {
   const open = footprintOf(rows([[104, 5, 5], [103, 2, 2], [102, 4, 4]]), { h: 104, l: 102, c: 103 });
   assert.equal(open.unfinishedHigh, true);

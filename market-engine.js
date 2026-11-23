@@ -38,7 +38,7 @@ export function buildMarketAnalysis(events, { intervalMs = 15 * 60_000, priceSte
     cumulativeDelta += delta;
     // POC, value area, diagonal imbalance, stacked imbalance, absorption and the unfinished
     // auction all come from one module, shared with the live browser path.
-    const foot = footprintOf(bar.levels, { ...footprintOptions, h: bar.h, l: bar.l, c: bar.c });
+    const foot = footprintOf(bar.levels, { ...footprintOptions, priceStep, h: bar.h, l: bar.l, c: bar.c });
     const levels = foot.levels;
     const imbalances = foot.imbalances;
     const stacked = foot.stackedImbalances;

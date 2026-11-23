@@ -260,7 +260,7 @@ function applyLiveTick(event){
  const bar=bars.at(-1);
  const state={levels:bar.levelMap,o:bar.o,h:bar.h,l:bar.l,c:bar.c,volume:bar.volume||0,bid:bar.bid||0,ask:bar.ask||0,unknown:bar.unknown||0,tickCount:bar.tickCount||0};
  applyTickToBar(state,{last:Number(event.last),volume:footprintTickVolume(event),aggressorSide:event.aggressorSide,flags:event.flags},0.1);
- const foot=footprintOf(state.levels,{...footprintOptions(),h:state.h,l:state.l,c:state.c});
+ const foot=footprintOf(state.levels,{...footprintOptions(),priceStep:0.1,h:state.h,l:state.l,c:state.c});
  bar.levelMap=state.levels;
  Object.assign(bar,{o:state.o,h:state.h,l:state.l,c:state.c,volume:state.volume,bid:state.bid,ask:state.ask,unknown:state.unknown,tickCount:state.tickCount,
   levels:foot.levels,delta:foot.delta,deltaRatio:foot.deltaRatio,poc:foot.poc,valueArea:foot.valueArea,imbalances:foot.imbalances,

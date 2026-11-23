@@ -111,6 +111,16 @@ function valueAreaAround(rows, pocIndex, total, share) {
   };
 }
 
+// The ladder's price step when the caller did not pass one: the smallest distance between rows.
+function smallestGap(levels) {
+  let gap = Infinity;
+  for (let i = 1; i < levels.length; i++) {
+    const d = Math.abs(levels[i - 1].price - levels[i].price);
+    if (d > 1e-9 && d < gap) gap = d;
+  }
+  return finite(gap) ? gap : 0;
+}
+
 function median(values) {
   const sorted = values.filter(finite).sort((a, b) => a - b);
   if (!sorted.length) return 0;
@@ -144,10 +154,15 @@ export function footprintOf(input, options = {}) {
     if (better || (tie && Math.abs(levels[i].price - mid) < Math.abs(levels[pocIndex].price - mid))) pocIndex = i;
   }
 
-  // Diagonal imbalance: buy volume here against sell volume one level lower, and the mirror.
+  // Diagonal imbalance: buy volume here against sell volume one price step lower, and the mirror.
+  // Neighbours are compared only when they really are one step apart: rows with an untraded price
+  // between them are not adjacent levels, even though they sit next to each other in the array.
+  const step = positive(options.priceStep) ? options.priceStep : smallestGap(levels);
+  const adjacent = (a, b) => !!a && !!b && step > 0 && Math.abs(Math.abs(a.price - b.price) - step) < step * 1e-6;
   const imbalances = [];
   for (let i = 0; i < levels.length; i++) {
-    const below = levels[i + 1], above = levels[i - 1];
+    const below = adjacent(levels[i], levels[i + 1]) ? levels[i + 1] : null;
+    const above = adjacent(levels[i], levels[i - 1]) ? levels[i - 1] : null;
     if (below && levels[i].ask >= o.minLevelVolume && below.bid > 0 && levels[i].ask >= o.imbalanceRatio * below.bid) {
       imbalances.push({ side: 'buy', price: levels[i].price, ratio: Number((levels[i].ask / below.bid).toFixed(2)) });
     }
@@ -161,6 +176,11 @@ export function footprintOf(input, options = {}) {
     let run = [];
     for (let i = 0; i < levels.length; i++) {
       const hit = imbalances.some(item => item.side === side && item.price === levels[i].price);
+      // A stack is consecutive price steps: a gap in the ladder ends the run.
+      if (hit && run.length && !adjacent(levels[i], levels[i - 1])) {
+        if (run.length >= o.imbalanceLevels) stackedImbalances.push({ side, prices: run });
+        run = [];
+      }
       if (hit) run.push(levels[i].price);
       else {
         if (run.length >= o.imbalanceLevels) stackedImbalances.push({ side, prices: run });
@@ -176,8 +196,10 @@ export function footprintOf(input, options = {}) {
   const unfinishedHigh = top.bid > 0 && top.ask > 0;
   const unfinishedLow = bottom.bid > 0 && bottom.ask > 0;
 
-  // Absorption: an outer row carrying far more than a typical row while price closed back
-  // inside the bar. That is a passive order soaking up the aggression, not a breakout.
+  // Absorption: an outer row carrying far more aggressive volume than a typical row while price
+  // closed back inside the bar. That is a passive order soaking up the aggression, not a breakout.
+  // Only volume with a known aggressor counts: ticks the broker did not classify cannot show that
+  // anyone was absorbed, so they never create an absorption mark on their own.
   const rowVolumes = levels.map(row => row.total).filter(value => value > 0);
   const medianLevelVolume = median(rowVolumes);
   const absorbedLevels = [];
@@ -185,9 +207,10 @@ export function footprintOf(input, options = {}) {
     for (const row of levels) {
       const edge = row === top || row === bottom || Math.abs(row.price - options.h) < 1e-9 || Math.abs(row.price - options.l) < 1e-9;
       if (!edge) continue;
-      if (row.total < o.absorptionMultiple * medianLevelVolume) continue;
+      const aggressive = row.bid + row.ask;
+      if (aggressive < o.absorptionMultiple * medianLevelVolume) continue;
       if (Math.abs(options.c - row.price) < 1e-9) continue;
-      absorbedLevels.push({ price: row.price, volume: row.total, multiple: Number((row.total / medianLevelVolume).toFixed(2)) });
+      absorbedLevels.push({ price: row.price, volume: aggressive, multiple: Number((aggressive / medianLevelVolume).toFixed(2)) });
     }
   }
 
