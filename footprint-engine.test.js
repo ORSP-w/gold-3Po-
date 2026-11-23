@@ -78,6 +78,11 @@ test('imbalance compares neighbouring price steps, not neighbouring array rows',
   // The step is taken from the rows when the caller does not pass it.
   const inferred = footprintOf(rows([[104, 1, 12], [103.5, 1, 1], [102, 2, 1]]), { h: 104, l: 102, c: 103 });
   assert.ok(!inferred.imbalances.some(item => item.price === 103.5 && item.side === 'buy'), 'with a 0.5 step, 103.5 and 102 are not neighbours');
+  // Here the inferred step alone decides: the smallest gap is 1, so 104 and 103 are compared and
+  // 103 and 101 (two steps apart) are not.
+  const onlyInferred = footprintOf(rows([[104, 1, 12], [103, 2, 12], [101, 2, 1]]), { h: 104, l: 101, c: 103 });
+  assert.ok(onlyInferred.imbalances.some(item => item.price === 104 && item.side === 'buy'), '104 against 103 is one inferred step and is compared');
+  assert.ok(!onlyInferred.imbalances.some(item => item.price === 103 && item.side === 'buy'), '103 against 101 is two inferred steps and is not compared');
 });
 
 test('a stack is broken by an untraded price step', () => {
@@ -92,6 +97,10 @@ test('volume without a known aggressor never creates absorption on its own', () 
   assert.deepEqual(unknown.absorbedLevels, [], 'unclassified broker ticks cannot prove absorption');
   const known = footprintOf(rows([[104, 20, 20], [103, 2, 2], [102, 2, 2]]), { h: 104, l: 102, c: 103 });
   assert.equal(known.absorbedLevels.length, 1, 'the same row with a known aggressor is still flagged');
+  // Unclassified ticks on the inner rows must not raise the bar a real absorption is measured against.
+  const noisy = footprintOf([{ price: 104, bid: 10, ask: 10, unknown: 0 }, { price: 103, bid: 2, ask: 2, unknown: 30 }, { price: 102, bid: 2, ask: 2, unknown: 30 }], { h: 104, l: 102, c: 103 });
+  assert.equal(noisy.absorbedLevels.length, 1, 'aggressive volume is compared with the median aggressive row');
+  assert.equal(noisy.absorbedLevels[0].multiple, 5);
 });
 
 test('an unfinished auction is an extreme that still shows both sides', () => {

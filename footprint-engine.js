@@ -200,17 +200,20 @@ export function footprintOf(input, options = {}) {
   // closed back inside the bar. That is a passive order soaking up the aggression, not a breakout.
   // Only volume with a known aggressor counts: ticks the broker did not classify cannot show that
   // anyone was absorbed, so they never create an absorption mark on their own.
+  // The threshold compares like with like: aggressive volume against the median aggressive row, so
+  // unclassified ticks neither create a mark nor inflate the bar it is measured against.
   const rowVolumes = levels.map(row => row.total).filter(value => value > 0);
   const medianLevelVolume = median(rowVolumes);
+  const medianAggressive = median(levels.map(row => row.bid + row.ask).filter(value => value > 0));
   const absorbedLevels = [];
-  if (medianLevelVolume > 0 && finite(options.c)) {
+  if (medianAggressive > 0 && finite(options.c)) {
     for (const row of levels) {
       const edge = row === top || row === bottom || Math.abs(row.price - options.h) < 1e-9 || Math.abs(row.price - options.l) < 1e-9;
       if (!edge) continue;
       const aggressive = row.bid + row.ask;
-      if (aggressive < o.absorptionMultiple * medianLevelVolume) continue;
+      if (aggressive < o.absorptionMultiple * medianAggressive) continue;
       if (Math.abs(options.c - row.price) < 1e-9) continue;
-      absorbedLevels.push({ price: row.price, volume: aggressive, multiple: Number((aggressive / medianLevelVolume).toFixed(2)) });
+      absorbedLevels.push({ price: row.price, volume: aggressive, multiple: Number((aggressive / medianAggressive).toFixed(2)) });
     }
   }
 
