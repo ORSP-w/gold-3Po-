@@ -332,3 +332,68 @@ test('a connector process that has exited ends the session at once, without retr
   assert.equal(state.state, 'offline', 'a dead connector cannot answer a retry');
   assert.match(state.message, /Модуль MT5 закрылся/);
 });
+
+function licenceApi(answer) {
+  const base = fakeApi();
+  return async (url, init) => new URL(url).pathname === '/v1/license/status' ? answer() : base.request(url, init);
+}
+
+test('a licence check answering 200 with valid:false ends the session at once', async () => {
+  let checks = 0;
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 20, maxFailures: 5,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: { ok: true, ticks: [] }
+    }),
+    request: licenceApi(() => { checks++; return { ok: true, status: 200, json: async () => ({ valid: false }) }; }),
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const state = session.state();
+  assert.ok(checks >= 1, 'the licence status endpoint was asked');
+  assert.equal(state.state, 'offline', 'an answered invalid licence is not retried');
+  assert.match(state.message, /Лицензия GOLD-3Po недействительна/);
+});
+
+test('an unreadable licence answer is a failed check, never treated as valid', async () => {
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 20, maxBackoffMs: 40, maxFailures: 5,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: { ok: true, ticks: [] }
+    }),
+    request: licenceApi(() => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } })),
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.notEqual(session.state().state, 'online', 'an unreadable licence answer must not leave the session online');
+  await new Promise(resolve => setTimeout(resolve, 600));
+  const state = session.state();
+  assert.equal(state.state, 'offline', 'after the retries it gives up');
+  assert.match(state.message, /Не удалось проверить лицензию/);
+});
+
+test('the last retry says the next failure closes the connection', async () => {
+  let failures = 4;
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 10, maxBackoffMs: 20, maxFailures: 5,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { if (failures-- > 0) throw new Error('Терминал MT5 недоступен.'); return new Promise(() => {}); }
+    }),
+    request: fakeApi().request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const state = session.state();
+  assert.equal(state.state, 'reconnecting');
+  assert.match(state.message, /Повтор 4 из 4.*последний: при новой ошибке соединение будет закрыто/);
+  await session.disconnect();
+});

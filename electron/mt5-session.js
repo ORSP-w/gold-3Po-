@@ -108,7 +108,8 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       // An answered "not valid" ends the session at once; only an unreachable service is retried.
       const body = await response.json().catch(() => null);
       if (response.status === 402 || body?.valid === false) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
-      if (!response.ok) throw new Error('Не удалось проверить лицензию.');
+      // An unreachable service, or an answer that cannot be read, is a failed check: it never counts as valid.
+      if (!response.ok || body?.valid !== true) throw new Error('Не удалось проверить лицензию.');
     } else {
       return;
     }
@@ -145,7 +146,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.failures = (owner.failures || 0) + 1;
       if (owner.failures >= maxFailures || owner.worker.stopped?.()) { await disconnect(error.message); return; }
       delay = Math.min(pollMs * 2 ** owner.failures, maxBackoffMs);
-      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures - 1} через ${Math.round(delay / 1000)} с.` });
+      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures - 1} через ${Math.round(delay / 1000)} с${owner.failures === maxFailures - 1 ? ', последний: при новой ошибке соединение будет закрыто' : ''}.` });
     } finally {
       if (session === owner) owner.timer = setTimeout(() => void poll(owner), delay);
     }
