@@ -32,17 +32,16 @@ class FakeMT5:
         self.latest = SimpleNamespace(time=SECOND, time_msc=SECOND * 1000 + 800)
         self.rows = [tick(SECOND, 800)]
         self.calls = []
-        self.login_ok = True
         self.select_ok = True
         self.copy_error = False
+
+    def symbols_get(self):
+        return [SimpleNamespace(name="EURUSD", visible=True),
+                SimpleNamespace(name="XAUUSDm", visible=True)]
 
     def initialize(self, *args, timeout):
         self.calls.append(("initialize", args, timeout))
         return True
-
-    def login(self, number, *, password, server, timeout):
-        self.calls.append(("login", number, password, server, timeout))
-        return self.login_ok
 
     def shutdown(self):
         self.calls.append(("shutdown",))
@@ -74,7 +73,8 @@ class FakeMT5:
 class ConnectorTests(unittest.TestCase):
     def setUp(self):
         self.api = FakeMT5()
-        self.worker = connector.Worker(lambda: self.api)
+        self.terminal_path = os.path.join(self.api.install, "terminal64.exe")
+        self.worker = connector.Worker(lambda: self.api, lambda: [self.terminal_path])
         self.addCleanup(self.worker.close)
 
     def command(self, op, **fields):
@@ -82,27 +82,35 @@ class ConnectorTests(unittest.TestCase):
         return connector.handle_line(self.worker, line)
 
     def connect(self, **fields):
-        return self.command("connect", **{"terminalPath": os.path.join(self.api.install, "terminal64.exe"),
-                                           "login": "1234", "password": SECRET, "server": "Broker-Demo",
-                                           "symbol": "XAUUSDm", **fields})
+        return self.command("connect", **fields)
 
-    def test_connect_investor_account_and_exact_suffix(self):
+    def test_connect_uses_the_already_authorized_account_without_credentials(self):
         self.assertEqual(self.connect(), {"id": "request-1", "ok": True, "symbol": "XAUUSDm",
                                          "commonDataPath": "common data", "dataPath": "terminal data",
+                                         "terminalPath": self.terminal_path,
+                                         "accountLogin": "1234", "server": "Broker-Demo",
                                          "specUnavailable": "symbol_info_failed"})
         self.assertEqual(self.api.calls, [
-            ("initialize", (os.path.join(self.api.install, "terminal64.exe"),), connector.MT5_TIMEOUT_MS),
-            ("login", 1234, SECRET, "Broker-Demo", connector.MT5_TIMEOUT_MS),
+            ("initialize", (self.terminal_path,), connector.MT5_TIMEOUT_MS),
             ("symbol_select", "XAUUSDm", True),
         ])
+        self.assertNotIn("login", [call[0] for call in self.api.calls])
 
-    def test_auto_discover_and_clean_failure(self):
-        self.api.login_ok = False
-        result = self.connect(terminalPath=None)
-        self.assertEqual(self.api.calls[0], ("initialize", (), connector.MT5_TIMEOUT_MS))
-        self.assertEqual(result["error"], "login_failed")
-        self.assertEqual(result["mt5Code"], -6)
-        self.assertNotIn(SECRET, json.dumps(result))
+    def test_auto_discovery_requires_one_running_terminal(self):
+        worker = connector.Worker(lambda: self.api, lambda: [])
+        result = connector.handle_line(worker, b'{"id":"request-1","op":"connect"}')
+        self.assertEqual(result["error"], "terminal_not_running")
+        worker.close()
+        worker = connector.Worker(lambda: self.api, lambda: [self.terminal_path, self.terminal_path + ".other"])
+        result = connector.handle_line(worker, b'{"id":"request-1","op":"connect"}')
+        self.assertEqual(result["error"], "multiple_terminal_instances")
+        worker.close()
+
+    def test_auto_discovery_never_logs_into_an_unauthorized_terminal(self):
+        self.api.terminal.connected = False
+        result = self.connect()
+        self.assertEqual(result["error"], "terminal_not_authorized")
+        self.assertNotIn("login", [call[0] for call in self.api.calls])
         self.assertEqual(self.command("poll")["error"], "not_connected")
 
     def test_wrong_terminal_does_not_receive_login(self):
