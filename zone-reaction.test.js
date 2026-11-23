@@ -65,6 +65,25 @@ test('a reaction that arrives after the horizon is not credited', () => {
   assert.equal(out.rate, 0.5);
 });
 
+test('a long touch gets no more look-ahead than the horizon', () => {
+  // Five candles sit in the zone, then price rejects. With horizon 3 counted from the touch, the
+  // rejection on the sixth candle after the touch began is outside the window.
+  const bars = [
+    bar(98, 97, 98),
+    bar(99.6, 98.6, 99.2),
+    bar(100.4, 99.2, 99.8),
+    bar(100.6, 99.4, 100.1),
+    bar(100.5, 99.3, 99.9),
+    bar(100.2, 99.1, 99.5),
+    bar(98.9, 97.4, 97.6)
+  ];
+  const out = measureZoneReactions(bars, zone, { atr: 1, horizon: 3 });
+  assert.equal(out.touches, 1);
+  assert.equal(out.lastTouchIndex, 5);
+  assert.equal(out.respected, 0, 'a reaction past horizon candles from the touch must not be credited');
+  assert.equal(out.neutral, 1);
+});
+
 test('support is measured in the opposite direction', () => {
   // Approached from above, bounced back up above the zone: the zone acted as support.
   const bars = [bar(103, 102, 102.5), bar(101.4, 100.2, 100.6), bar(102.3, 101.2, 102)];

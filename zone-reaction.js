@@ -3,7 +3,8 @@
 // cut through repeatedly cannot claim a high score.
 //
 // A "touch" is a run of consecutive candles overlapping the zone, entered from outside it.
-// From that run the measurement looks ahead up to `horizon` candles and takes the first outcome:
+// From the first candle of that run the measurement looks at most `horizon` candles ahead (the run
+// itself included, so a long run is not given extra look-ahead) and takes the first outcome:
 //   respected — price turned back and left the zone by reactionAtr * ATR on the side it arrived from
 //               (a touch from below must fall under zone.low, a touch from above must rise over zone.high);
 //   broken    — a candle closed through the zone by breakAtr * ATR on the opposite side;
@@ -37,8 +38,9 @@ export function measureZoneReactions(bars, zone, options = {}) {
     lastTouchIndex = end;
 
     let outcome = 'neutral';
-    // Scan from the first candle of the run so the first outcome wins; the horizon counts from the run's end.
-    const limit = Math.min(bars.length - 1, end + horizon);
+    // Scan from the first candle of the run so the first outcome wins. The horizon counts from the touch
+    // itself, so a wide zone that holds price for many candles gets no longer window than a thin one.
+    const limit = Math.min(bars.length - 1, i + horizon);
     for (let k = i; k <= limit; k++) {
       const candle = bars[k];
       if (!finite(candle.c) || !finite(candle.h) || !finite(candle.l)) continue;
