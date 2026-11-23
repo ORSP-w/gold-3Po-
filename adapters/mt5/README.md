@@ -51,7 +51,7 @@ Zones are built from several independent sources (swings, the previous day's hig
 
 ## Operational boundary
 
-- The EA must be compiled in MetaEditor. GitHub Actions cannot compile MQL5 source.
+- GOLD-3Po copies and attempts to compile both MQL5 sources through MetaEditor on the user's PC. GitHub Actions does not include the proprietary MT5 MetaEditor runtime, so the real MQL5 compilation result is reported by the application on that PC.
 - The desktop application and MT5 terminal run on the same machine through localhost. For a shared central feed, deploy the API behind HTTPS and configure the EA URLs to that server.
 - The EA only sends market data. It never submits, modifies or closes orders.
 - The EA source has not been certified against a live RoboForex account in this repository workflow; verify MetaEditor compilation and a demo-account feed before relying on it.
