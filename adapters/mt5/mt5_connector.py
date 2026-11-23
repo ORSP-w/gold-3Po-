@@ -217,14 +217,9 @@ def running_terminal_paths():
         raise WorkerError("terminal_discovery_failed",
                           "Windows не смогла определить путь к запущенному MetaTrader 5.")
     paths = []
-    seen = set()
     for line in result.stdout.splitlines():
         candidate = line.strip().strip('"')
-        if not candidate or os.path.basename(candidate).casefold() != "terminal64.exe":
-            continue
-        key = os.path.normcase(os.path.realpath(candidate))
-        if key not in seen and os.path.isfile(candidate):
-            seen.add(key)
+        if candidate and os.path.basename(candidate).casefold() == "terminal64.exe" and os.path.isfile(candidate):
             paths.append(os.path.realpath(candidate))
     return paths
 
