@@ -15,8 +15,8 @@ input string ZonesUrl = "http://127.0.0.1:8787/v1/chart/zones";
 input int ZonesRefreshSeconds = 5;
 input int ZoneLookbackBars = 200;
 input bool UseAppStyle = true;            // colours / line style from GOLD-3Po settings
-input color BuyZoneColor = clrRed;         // zones above price (when UseAppStyle=false)
-input color SellZoneColor = clrRed;        // zones below price (when UseAppStyle=false)
+input color BuyZoneColor = clrAqua;       // buy-side liquidity above price (when UseAppStyle=false)
+input color SellZoneColor = clrTomato;     // sell-side liquidity below price (when UseAppStyle=false)
 input ENUM_LINE_STYLE ZoneLineStyle = STYLE_SOLID;
 input int ZoneLineWidth = 2;
 
@@ -427,7 +427,7 @@ void RefreshZones()
    color buyColor = BuyZoneColor, sellColor = SellZoneColor;
    ENUM_LINE_STYLE lineStyle = ZoneLineStyle;
    int lineWidth = (int)MathMax(1, MathMin(5, ZoneLineWidth));
-   bool fill = false, showLabels = true, showStrength = true;
+   bool fill = true, showLabels = true, showStrength = true;
    int styleStart = StringFind(response, "\"style\":{");
    if(UseAppStyle && styleStart >= 0)
    {
