@@ -66,6 +66,31 @@ test('the prior day extremes match the actual previous session', () => {
   assert.equal(levels.find(level => level.label === 'Prior day low').price, expectedLow);
 });
 
+test('calendar levels point at the candle that formed them in the original series', () => {
+  const bars = history();
+  const levels = collectSourceLevels(bars, { priceStep: 0.1 });
+  const byLabel = label => levels.find(level => level.label === label);
+  const lastDay = bars.at(-1).time.slice(0, 10);
+  const previousDay = bars.filter(bar => bar.time < lastDay).at(-1).time.slice(0, 10);
+  const checks = [
+    ['Prior day high', 'h', bar => bar.time.startsWith(previousDay)],
+    ['Prior day low', 'l', bar => bar.time.startsWith(previousDay)],
+    ['London high', 'h', bar => { const hour = new Date(bar.time).getUTCHours(); return hour >= 7 && hour < 12; }],
+    ['Prior week high', 'h', bar => bar.time >= '2026-01-05' && bar.time < '2026-01-12'],
+    ['Prior week low', 'l', bar => bar.time >= '2026-01-05' && bar.time < '2026-01-12']
+  ];
+  for (const [label, field, inPeriod] of checks) {
+    const level = byLabel(label);
+    assert.ok(level, 'missing source: ' + label);
+    const candle = bars[level.index];
+    assert.ok(candle && inPeriod(candle), label + ' must point at a candle inside its own period');
+    assert.equal(candle[field], level.price, label + ' must point at the candle that set the price');
+  }
+  const weeklyOpen = byLabel('Weekly open');
+  assert.equal(bars[weeklyOpen.index].time, '2026-01-12T00:00:00.000Z', 'the weekly open is the first candle of the week');
+  assert.equal(bars[weeklyOpen.index].o, weeklyOpen.price);
+});
+
 test('the volume profile is ordered and inside the traded range', () => {
   const bars = history();
   const levels = collectSourceLevels(bars, { priceStep: 0.1 });
