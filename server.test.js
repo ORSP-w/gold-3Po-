@@ -211,7 +211,7 @@ test('chart zones follow the settings and carry the MT5 drawing style',async()=>
 const stackFixture = () => {
   const ticks = [];
   let seq = 1;
-  const barTime = Date.now() - 30 * 900000; // a closed bar, not the forming one
+  const barTime = Math.floor(Date.now() / 900000) * 900000 - 30 * 900000; // align to a closed 15-minute boundary
   // quiet prior market around 2650: its 20-bar low (~2649.4) is the liquidity the sweep takes
   for (let i = 0; i < 40; i++) {
     const t = new Date(barTime - (40 - i) * 900000);
@@ -238,7 +238,8 @@ const sweepFixture = () => {
   // memory can record. Anchored to the wall clock for the licence watermark.
   const ticks = [];
   let seq = 1;
-  const at = i => new Date(Date.now() - (80 - i) * 900000).toISOString();
+  const fixtureBase = Math.floor(Date.now() / 900000) * 900000;
+  const at = i => new Date(fixtureBase - (80 - i) * 900000).toISOString();
   const push = (i, last, vol, flags) => ticks.push({ timestamp: at(i), sequence: seq++, bid: +(last - 0.1).toFixed(2), ask: +(last + 0.1).toFixed(2), last, tickVolume: vol, realVolume: vol, flags });
   for (let i = 0; i < 25; i++) { push(i, 2649.02, 3, 0); push(i, 2649, 3, 0); push(i, 2649.15, 4, 32); }
   for (let i = 25; i < 70; i++) { const low = 2649 - (i - 24) * 0.1; push(i, low + 0.02, 3, 0); push(i, low, 3, 0); push(i, low + 0.15, 4, 32); }
