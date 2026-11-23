@@ -92,8 +92,9 @@ try {
   assert.equal(await page.locator('rect.zone-buy, rect.zone-sell').count(), 0, 'zone toggle should hide overlays');
   await page.locator('#zonesToggle').click();
 
+  // The history has no aggressor side: Delta mode must not paint those rows as buying or selling.
   await page.locator('#footprintModes [data-mode="delta"]').click();
-  assert.ok(await page.locator('.delta-positive, .delta-negative').count() > 0, 'Delta mode should render delta cells');
+  assert.equal(await page.locator('.foot-cell.delta-positive, .foot-cell.delta-negative').count(), 0, 'rows without a known side carry no delta colour');
   await page.locator('#footprintModes [data-mode="volume"]').click();
   assert.ok(await page.locator('.volume-cell').count() > 0, 'Volume mode should render volume cells');
   // Delta %, buy and sell: each mode really switches what the cells show. The history above has no
@@ -106,6 +107,10 @@ try {
   await page.locator('#resetView').click();
   await page.waitForTimeout(300);
   const cellTexts = () => page.evaluate(() => [...document.querySelectorAll('#footprintGrid .foot-cell')].map(node => node.textContent.replace(/[◆\s\u00a0]/g, '')).filter(Boolean));
+  await page.locator('#footprintModes [data-mode="delta"]').click();
+  const deltaTexts = await cellTexts();
+  assert.ok(deltaTexts.includes('+6') && deltaTexts.includes('-5'), 'Delta mode shows each classified row as ask minus bid: ' + deltaTexts.join(' '));
+  assert.ok(await page.locator('.foot-cell.delta-positive').count() > 0 && await page.locator('.foot-cell.delta-negative').count() > 0, 'Delta mode colours buying and selling rows');
   await page.locator('#footprintModes [data-mode="deltaPct"]').click();
   const pctTexts = await cellTexts();
   assert.ok(pctTexts.includes('+50%') && pctTexts.includes('-56%') && pctTexts.every(text => /^[+-]?\d+%$/.test(text)), 'Delta % mode shows each row as a share of its sided volume: ' + pctTexts.slice(0, 8).join(' '));

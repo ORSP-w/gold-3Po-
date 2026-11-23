@@ -164,9 +164,9 @@ function renderFootprint(){
   const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
   let content='',cls='';
   if(mode==='bidask'){content=showNumbers&&total?`<span>${v.unknown&&!v.bid&&!v.ask?'·':v.bid}</span><span>${v.unknown&&!v.bid&&!v.ask?'·':v.ask}</span>`:'';cls='bidask';}
-  if(mode==='delta'){content=showNumbers?(total?((delta>0?'+':'')+delta):''):'';cls=delta>=0?'delta-positive':'delta-negative';}
   if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
-  if(mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
+  // The value modes share one definition with the engine, so a row without a known side reads the same in all of them.
+  if(mode==='delta'||mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
   if(imbalance)cls+=' imbalance-'+imbalance;
   if(isPoc)cls+=' foot-poc';
   if(inVa)cls+=' foot-va';
