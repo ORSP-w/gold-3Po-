@@ -5,10 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSettingsStore, validateSettings, DEFAULT_SETTINGS } from './settings-store.js';
 
-test('defaults draw red solid zone lines and look for 3..7 zones', () => {
+test('defaults draw distinct filled buy/sell zones and look for 3..7 zones', () => {
   const s = validateSettings({});
-  assert.equal(s.mt5.buyColor, '#FF0000');
-  assert.equal(s.mt5.sellColor, '#FF0000');
+  assert.equal(s.mt5.buyColor, '#99FFE4');
+  assert.equal(s.mt5.sellColor, '#FF8080');
+  assert.equal(s.mt5.fill, true);
   assert.equal(s.mt5.lineStyle, 'solid');
   assert.equal(s.zones.minZones, 3);
   assert.equal(s.zones.maxZones, 7);
