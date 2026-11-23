@@ -1,6 +1,7 @@
 import { barDelta, totalVolume } from './market-data.js';
-import { footprintOf, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
+import { footprintOf, footprintCell, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
+import { candlePart } from './footprint-candle.js';
 import { chartScale } from './chart-scale.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
@@ -11,6 +12,9 @@ const chartViewport=chart.parentElement;
 // The user's footprint options (published by settings-client at module init and on every save).
 // The live path recomputes the forming bar with them, so a changed setting shows at once.
 const footprintOptions=()=>window.gold3poSettings?.footprint&&Object.keys(window.gold3poSettings.footprint).length?window.gold3poSettings.footprint:DEFAULT_FOOTPRINT_OPTIONS;
+// The footprint's source precision as the server built the bars: the broker tick size when MT5 reported
+// one, otherwise 0.1. The live forming bar uses the same step so it matches the bars around it.
+const footprintStep=()=>{const step=Number(analysisMeta?.footprintStep);return Number.isFinite(step)&&step>0&&step<=100?step:0.1;};
 const fmt=(v,d=2)=>Number(v).toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d});
 const timeLabel=(value,options={},method='toLocaleString')=>{const date=new Date(value);return Number.isNaN(date.getTime())?String(value):date[method]('en-GB',options);};
 const zonesWord=n=>{const tens=n%100,ones=n%10;if(ones===1&&tens!==11)return n+' зона';if(ones>=2&&ones<=4&&(tens<12||tens>14))return n+' зоны';return n+' зон';};
@@ -122,7 +126,7 @@ function levelOf(b,price){
 function barFootprint(b){
  if(b.poc!==undefined&&b.valueArea!==undefined&&Array.isArray(b.levels))return b;
  if(!Array.isArray(b?.levels))return b;
- return {...b,...footprintOf(b.levels,{...footprintOptions(),h:b.h,l:b.l,c:b.c,priceStep:0.1})};
+ return {...b,...footprintOf(b.levels,{...footprintOptions(),h:b.h,l:b.l,c:b.c,priceStep:footprintStep()})};
 }
 function renderFootprint(){
  if(!bars.length){grid.innerHTML='<div class="detail-caption">Тики брокера ещё не поступили. Подключите MT5, чтобы построить футпринт.</div>';return;}
@@ -130,9 +134,11 @@ function renderFootprint(){
  // hiding behind a horizontal scrollbar.
  const available=Math.max(320,(grid.clientWidth||900)-24),maxCols=Math.max(6,Math.min(60,Math.floor((available-68-92)/34)));
  const windowSize=maxCols,start=Math.max(0,Math.min(Math.max(0,bars.length-windowSize),selected-Math.floor(windowSize/2))),visible=bars.slice(start,start+windowSize),offset=start;
- // Only prices that actually traded are drawn: a row of zeros is not information.
+ // Only prices that actually traded are drawn: a row of zeros is not information. Rows come from the
+ // computed footprint, so a ticks-per-row grouping changes the ladder the same way it changes the marks.
+ const feet=visible.map(barFootprint);
  const traded=new Map();
- for(const b of visible)for(const row of (Array.isArray(b.levels)?b.levels:[])){
+ for(const b of feet)for(const row of (Array.isArray(b.levels)?b.levels:[])){
   if(!(row.bid||row.ask||row.unknown))continue;
   const key=Number(row.price).toFixed(2);
   if(!traded.has(key))traded.set(key,{price:Number(row.price),total:0,volume:(b.volume||0)});
@@ -140,10 +146,9 @@ function renderFootprint(){
  }
  const priceRows=[...traded.values()].sort((a,b)=>b.price-a.price).map(item=>item.price);
  if(!priceRows.length){grid.innerHTML='<div class="detail-caption">В выбранном окне нет сделок: футпринт появится с первыми тиками.</div>';return;}
- const feet=visible.map(barFootprint);
  // One scale for the whole panel: a colour means the same thing in every column.
  const scale=Math.max(1,...feet.map(b=>Number(b.maxLevelVolume)||0));
- const profile=sessionProfile(bars,{priceStep:0.1,options:footprintOptions()});
+ const profile=sessionProfile(bars,{priceStep:footprintStep(),options:footprintOptions()});
  const currentProfile=profile.current;
  const profileRows=new Map((currentProfile?.levels||[]).map(row=>[row.price.toFixed(2),row]));
  const profileMax=Math.max(1,...(currentProfile?.levels||[]).map(row=>row.total));
@@ -159,15 +164,21 @@ function renderFootprint(){
   const levelRows=Array.isArray(b.levels)?b.levels:[];
   const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
   let content='',cls='';
-  if(mode==='bidask'){content=showNumbers&&total?`<span>${v.unknown&&!v.bid&&!v.ask?'·':v.bid}</span><span>${v.unknown&&!v.bid&&!v.ask?'·':v.ask}</span>`:'';cls='bidask';}
-  if(mode==='delta'){content=showNumbers?(total?((delta>0?'+':'')+delta):''):'';cls=delta>=0?'delta-positive':'delta-negative';}
+  // A row with only unclassified ticks has no bid/ask split to show, so it stays blank rather than "· ·".
+  if(mode==='bidask'){content=showNumbers&&(v.bid||v.ask)?`<span>${v.bid}</span><span>${v.ask}</span>`:'';cls='bidask';}
   if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
+  // The value modes share one definition with the engine, so a row without a known side reads the same in all of them.
+  if(mode==='delta'||mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
   if(imbalance)cls+=' imbalance-'+imbalance;
   if(isPoc)cls+=' foot-poc';
   if(inVa)cls+=' foot-va';
   if(absorbed)cls+=' foot-absorbed';
   if(unfinished)cls+=' foot-unfinished';
   if(offset+i===bars.length-1)cls+=' foot-forming';
+  // Each column reads as its candle: rows between open and close are the body (coloured by the bar's
+  // direction), traded rows outside it are the wick, and rows the bar never reached stay blank.
+  const part=candlePart(b,p,footprintStep());
+  cls+=' candle-'+part+(part==='body'?(b.c>=b.o?' candle-up':' candle-down'):'');
   const marks=[isPoc?'POC':'',inVa?'зона стоимости':'',imbalance?(imbalance==='buy'?'имбаланс покупателей':'имбаланс продавцов'):'',absorbed?'поглощение':'',unfinished?'незакрытый аукцион':''].filter(Boolean).join(' · ');
   return `<button class="foot-cell ${cls} ${offset+i===selected?'active':''}" data-index="${offset+i}" style="--intensity:${intensity.toFixed(3)}" title="Бид ${v.bid}; аск ${v.ask}; без стороны ${v.unknown}${marks?' · '+marks:''}" aria-label="Свеча ${offset+i+1}, цена ${fmt(p)}, бид ${v.bid}, аск ${v.ask}, без стороны ${v.unknown}${marks?', '+marks:''}">${content}${isPoc?'<i class="poc-mark">◆</i>':''}</button>`;}).join('')}${(()=>{
   const row=profileRows.get(Number(p).toFixed(2));
@@ -259,8 +270,8 @@ function applyLiveTick(event){
  }
  const bar=bars.at(-1);
  const state={levels:bar.levelMap,o:bar.o,h:bar.h,l:bar.l,c:bar.c,volume:bar.volume||0,bid:bar.bid||0,ask:bar.ask||0,unknown:bar.unknown||0,tickCount:bar.tickCount||0};
- applyTickToBar(state,{last:Number(event.last),volume:footprintTickVolume(event),aggressorSide:event.aggressorSide,flags:event.flags},0.1);
- const foot=footprintOf(state.levels,{...footprintOptions(),h:state.h,l:state.l,c:state.c});
+ applyTickToBar(state,{last:Number(event.last),volume:footprintTickVolume(event),aggressorSide:event.aggressorSide,flags:event.flags},footprintStep());
+ const foot=footprintOf(state.levels,{...footprintOptions(),priceStep:footprintStep(),h:state.h,l:state.l,c:state.c});
  bar.levelMap=state.levels;
  Object.assign(bar,{o:state.o,h:state.h,l:state.l,c:state.c,volume:state.volume,bid:state.bid,ask:state.ask,unknown:state.unknown,tickCount:state.tickCount,
   levels:foot.levels,delta:foot.delta,deltaRatio:foot.deltaRatio,poc:foot.poc,valueArea:foot.valueArea,imbalances:foot.imbalances,

@@ -41,6 +41,7 @@ function startWorker(command, args) {
   });
   return {
     stop,
+    stopped: () => stopped,
     request(op, values = {}, timeout = 25_000) {
       if (stopped || current) return Promise.reject(new Error('Модуль MT5 недоступен или занят.'));
       return new Promise((resolve, reject) => {
@@ -52,7 +53,8 @@ function startWorker(command, args) {
   };
 }
 
-export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, makeWorker = startWorker, request = fetch, publish = publishSnapshot }) {
+export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, makeWorker = startWorker, request = fetch, publish = publishSnapshot,
+  now = () => Date.now(), pollMs = 1800, maxFailures = 5, maxBackoffMs = 30_000, staleAfterMs = 120_000, maxUnsent = 20_000 }) {
   let session = null;
   let status = { state: 'offline', message: 'MT5 не подключён.' };
   const fetchApi = (route, init = {}) => request(apiOrigin + route, { ...init, signal: AbortSignal.timeout(15_000) });
@@ -71,22 +73,41 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       unique.add(identity);
       records.push({ timestamp, bid, ask, last, tickVolume, realVolume, flags, eventId: `MT5-${identity}`, sequence: ++owner.sequence });
     }
+    // Live ticks the local service did not accept are kept and sent first next time: the connector has
+    // already moved past them, so dropping them would leave a hole. The service skips duplicates by
+    // event id, so a resend is safe. The queue is bounded; the oldest ticks go first if it fills.
+    if (!historical && owner.unsent?.length) {
+      records.unshift(...owner.unsent);
+      owner.unsent = [];
+    }
+    if (!historical && records.length > maxUnsent) {
+      owner.droppedTicks = (owner.droppedTicks || 0) + records.length - maxUnsent;
+      owner.droppedThisOutage = (owner.droppedThisOutage || 0) + records.length - maxUnsent;
+      records.splice(0, records.length - maxUnsent);
+    }
     for (let i = 0; i < records.length && session === owner; i += 1000) {
       const route = historical ? 'history' : 'live-batch';
       const send = () => fetchApi(`/v1/ingest/mt5/${route}`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, ticks: records.slice(i, i + 1000) })
+        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, spec: owner.spec ?? null, ticks: records.slice(i, i + 1000) })
       });
-      let response = await send();
-      if (response.status === 409 && !historical) {
-        const { lastAcceptedSequence } = await response.json();
-        if (!Number.isSafeInteger(lastAcceptedSequence)) throw new Error('Не удалось синхронизировать поток котировок.');
-        owner.sequence = Math.max(owner.sequence, lastAcceptedSequence);
-        for (let j = i; j < records.length; j++) records[j].sequence = ++owner.sequence;
-        response = await send();
+      // Any failure from here on (network, a 409 that cannot be resequenced, a rejected resend, an
+      // unreadable answer) keeps this batch and the rest for the next poll instead of losing them.
+      try {
+        let response = await send();
+        if (response.status === 409 && !historical) {
+          const { lastAcceptedSequence } = await response.json();
+          if (!Number.isSafeInteger(lastAcceptedSequence)) throw new Error('Не удалось синхронизировать поток котировок.');
+          owner.sequence = Math.max(owner.sequence, lastAcceptedSequence);
+          for (let j = i; j < records.length; j++) records[j].sequence = ++owner.sequence;
+          response = await send();
+        }
+        if (!response.ok) throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
+        await response.json();
+      } catch (error) {
+        if (!historical) owner.unsent = records.slice(i);
+        throw error;
       }
-      if (!response.ok) throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
-      await response.json();
     }
     return records.length;
   }
@@ -103,8 +124,11 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.cachedStyle = body.style;
     } else if (!changed) {
       const response = await fetchApi('/v1/license/status');
-      if (!response.ok) throw new Error('Не удалось проверить лицензию.');
-      if (!(await response.json()).valid) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
+      // An answered "not valid" ends the session at once; only an unreachable service is retried.
+      const body = await response.json().catch(() => null);
+      if (response.status === 402 || body?.valid === false) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
+      // An unreachable service, or an answer that cannot be read, is a failed check: it never counts as valid.
+      if (!response.ok || body?.valid !== true) throw new Error('Не удалось проверить лицензию.');
     } else {
       return;
     }
@@ -116,7 +140,11 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     set(owner, { zoneCount: owner.cachedZones.length });
   }
 
+  // A failed poll (terminal briefly gone, the local service restarting, HTTP 5xx) is retried with a
+  // growing pause instead of ending the session; after `maxFailures` in a row the session gives up.
+  // No new tick for `staleAfterMs` marks the feed stale in the status, without disconnecting.
   async function poll(owner) {
+    let delay = pollMs;
     try {
       const result = await owner.worker.request('poll');
       if (session !== owner) return;
@@ -124,14 +152,25 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       if (count) {
         owner.dirty = true;
         owner.lastTick = result.ticks.at(-1).timestamp;
+        owner.lastTickAt = now();
       }
       await refreshLevels(owner, owner.dirty);
-      const online = !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
-      set(owner, { state: 'online', lastTick: owner.lastTick ?? null, message: owner.historyNote ? `${online} ${owner.historyNote}` : online });
+      owner.failures = 0;
+      const stale = owner.lastTickAt !== undefined && now() - owner.lastTickAt > staleAfterMs;
+      const online = stale ? `Нет новых тиков более ${Math.round(staleAfterMs / 1000)} с: рынок закрыт или терминал не получает котировки.`
+        : !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
+      // The loss is reported once, for the outage that just ended; droppedTicks keeps the session total.
+      const lost = owner.droppedThisOutage ? ` Потеряно тиков за время сбоя: ${owner.droppedThisOutage}.` : '';
+      if (!owner.unsent?.length) owner.droppedThisOutage = 0;
+      set(owner, { state: 'online', feed: stale ? 'stale' : 'live', retries: 0, droppedTicks: owner.droppedTicks || 0, lastTick: owner.lastTick ?? null, message: (owner.historyNote ? `${online} ${owner.historyNote}` : online) + lost });
     } catch (error) {
-      if (session === owner) await disconnect(error.message);
+      if (session !== owner) return;
+      owner.failures = (owner.failures || 0) + 1;
+      if (owner.failures >= maxFailures || owner.worker.stopped?.()) { await disconnect(error.message); return; }
+      delay = Math.min(pollMs * 2 ** owner.failures, maxBackoffMs);
+      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures - 1} через ${Math.round(delay / 1000)} с${owner.failures === maxFailures - 1 ? ', последний: при новой ошибке соединение будет закрыто' : ''}.` });
     } finally {
-      if (session === owner) owner.timer = setTimeout(() => void poll(owner), 1800);
+      if (session === owner) owner.timer = setTimeout(() => void poll(owner), delay);
     }
   }
 
@@ -177,7 +216,12 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       if (result.symbol?.toUpperCase() !== owner.symbol || !result.commonDataPath || !result.dataPath) throw new Error('MT5 не подтвердил инструмент или папку данных.');
       owner.commonDataPath = result.commonDataPath;
       owner.dataPath = result.dataPath;
-      status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0 };
+      // The broker's tick size, when MT5 reported a usable one: the server builds footprint rows on it.
+      // Without it the status says why, so a failing MT5 call is visible instead of silent 0.1 rows.
+      const tickSize = Number(result.spec?.tickSize);
+      if (Number.isFinite(tickSize) && tickSize > 0 && tickSize <= 100) owner.spec = { tickSize };
+      const specNote = owner.spec ? {} : { tickSize: null, tickSizeIssue: typeof result.specUnavailable === 'string' ? result.specUnavailable.slice(0, 40) : 'not_reported' };
+      status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0, ...(owner.spec ? { tickSize: owner.spec.tickSize } : specNote) };
       void seed(owner);
       return state();
     } catch (error) {

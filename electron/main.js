@@ -318,7 +318,7 @@ async function runSmokeTest() {
     throw new Error('The packaged application HTML is missing required workspace elements.');
   }
 
-  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/setups-client.js', '/mt5-client.js', '/styles.css']) {
+  for (const asset of ['/app.js', '/market-client.js', '/research-client.js', '/license-client.js', '/setups-client.js', '/mt5-client.js', '/mt5-status.js', '/footprint-candle.js', '/styles.css']) {
     const response = await fetch(localOrigin + asset, { signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`Application asset ${asset} returned HTTP ${response.status}.`);
   }
