@@ -125,7 +125,9 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     } else if (!changed) {
       const response = await fetchApi('/v1/license/status');
       // An answered "not valid" ends the session at once; only an unreachable service is retried.
-      const body = await response.json();
+      let body;
+      try { body = await response.json(); }
+      catch { throw new Error('Не удалось проверить лицензию: ответ сервиса не является JSON.'); }
       if (response.status === 402 || body?.valid === false) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
       // An unreachable service, or an answer that cannot be read, is a failed check: it never counts as valid.
       if (!response.ok || body?.valid !== true) throw new Error('Не удалось проверить лицензию.');
