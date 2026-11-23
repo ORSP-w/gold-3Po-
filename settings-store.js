@@ -13,11 +13,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   zones: { ...DEFAULT_ZONE_OPTIONS, timeframeMinutes: 15 },
   footprint: { ...DEFAULT_FOOTPRINT_OPTIONS },
   mt5: {
-    buyColor: '#FF0000',   // zones above price (resistance / buy-side liquidity)
-    sellColor: '#FF0000',  // zones below price (support / sell-side liquidity)
+    buyColor: '#99FFE4',   // buy-side liquidity above price: cyan, matching the workspace chart
+    sellColor: '#FF8080',  // sell-side liquidity below price: red, matching the workspace chart
     lineStyle: 'solid',
     lineWidth: 2,
-    fill: false,           // shade the zone body as a rectangle behind the candles
+    fill: true,            // subtle filled zone plus visible high/low edges on the MT5 chart
     showLabels: true,
     showStrength: true
   },
