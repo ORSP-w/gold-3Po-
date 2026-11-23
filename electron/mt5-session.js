@@ -200,23 +200,23 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     return state();
   }
 
-  async function connect({ terminalPath, login, password, server, symbol } = {}) {
+  async function connect() {
     if (session) throw new Error('Сначала отключите текущее соединение.');
     if (!workerCommand) throw new Error('Модуль MT5 не установлен.');
-    if (typeof terminalPath !== 'string' || !/terminal64\.exe$/i.test(terminalPath) || terminalPath.length > 1024 ||
-      typeof login !== 'string' || !/^\d{1,15}$/.test(login) || Number(login) < 1 ||
-      typeof password !== 'string' || !password || password.length > 256 || typeof server !== 'string' || !server.trim() || server.length > 128 ||
-      typeof symbol !== 'string' || !/^(?:XAUUSD|GOLD)[A-Z0-9._#+-]{0,20}$/i.test(symbol) || symbol.includes('..')) {
-      throw new Error('Заполните путь к terminal64.exe, номер счёта, пароль, сервер и точное имя символа золота.');
-    }
     const worker = makeWorker(workerCommand, workerArgs);
-    const owner = { worker, server: server.trim(), symbol: symbol.toUpperCase(), sequence: Date.now() * 1000, levelAt: 0, dirty: true };
+    const owner = { worker, symbol: 'XAUUSD', sequence: Date.now() * 1000, levelAt: 0, dirty: true };
     session = owner;
-    status = { state: 'connecting', symbol: owner.symbol, message: 'Подключение к терминалу MT5…' };
+    status = { state: 'connecting', symbol: owner.symbol, message: 'Поиск уже авторизованного терминала MT5…' };
     try {
-      const result = await worker.request('connect', { terminalPath, login, password, server: owner.server, symbol }, 80_000);
+      const result = await worker.request('connect', {}, 80_000);
       if (session !== owner) return state();
-      if (result.symbol?.toUpperCase() !== owner.symbol || !result.commonDataPath || !result.dataPath) throw new Error('MT5 не подтвердил инструмент или папку данных.');
+      if (!result.symbol?.toUpperCase() || !result.commonDataPath || !result.dataPath || !result.terminalPath) {
+        throw new Error('MT5 не подтвердил авторизованный терминал, инструмент или каталог данных.');
+      }
+      owner.symbol = result.symbol.toUpperCase();
+      owner.server = result.server;
+      owner.accountLogin = result.accountLogin;
+      owner.terminalPath = result.terminalPath;
       owner.commonDataPath = result.commonDataPath;
       owner.dataPath = result.dataPath;
       // The broker's tick size, when MT5 reported a usable one: the server builds footprint rows on it.
@@ -224,7 +224,12 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const tickSize = Number(result.spec?.tickSize);
       if (Number.isFinite(tickSize) && tickSize > 0 && tickSize <= 100) owner.spec = { tickSize };
       const specNote = owner.spec ? {} : { tickSize: null, tickSizeIssue: typeof result.specUnavailable === 'string' ? result.specUnavailable.slice(0, 40) : 'not_reported' };
-      status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0, ...(owner.spec ? { tickSize: owner.spec.tickSize } : specNote) };
+      status = {
+        state: 'online', symbol: owner.symbol,
+        accountLabel: (owner.accountLogin ? 'Счёт ···' + String(owner.accountLogin).slice(-4) : 'Счёт MT5') + (owner.server ? ' · ' + owner.server : ''),
+        message: 'Подключено к уже авторизованному MT5. Загружаются котировки…',
+        zoneCount: 0, ...(owner.spec ? { tickSize: owner.spec.tickSize } : specNote)
+      };
       void seed(owner);
       return state();
     } catch (error) {
@@ -233,5 +238,15 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     }
   }
 
-  return { connect, disconnect, state, terminalDataPath: () => session?.dataPath };
+  function setIntegrationMessage(message) {
+    status = { ...status, integrationMessage: typeof message === 'string' ? message.slice(0, 600) : '' };
+    return state();
+  }
+
+  return {
+    connect, disconnect, state, setIntegrationMessage,
+    terminalPath: () => session?.terminalPath,
+    terminalDataPath: () => session?.dataPath,
+    commonDataPath: () => session?.commonDataPath
+  };
 }
