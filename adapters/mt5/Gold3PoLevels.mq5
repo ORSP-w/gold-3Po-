@@ -9,8 +9,8 @@ input int             InpPollSeconds    = 2;            // Timer interval (secon
 input int             InpStaleSeconds   = 180;          // Maximum snapshot age (seconds)
 input int             InpMaxZones       = 20;           // Draw at most this many zones (1..20); the app decides the count
 input bool            InpUseAppStyle    = true;         // Use colours/line style set in the GOLD-3Po app
-input color           InpBuySideColor   = clrRed;       // Zones above price (when not using app style)
-input color           InpSellSideColor  = clrRed;       // Zones below price (when not using app style)
+input color           InpBuySideColor   = clrAqua;      // Buy-side liquidity above price (when not using app style)
+input color           InpSellSideColor  = clrTomato;    // Sell-side liquidity below price (when not using app style)
 input ENUM_LINE_STYLE InpLineStyle      = STYLE_SOLID;  // Line style (when not using app style)
 input int             InpLineWidth      = 2;            // Line width 1..5 (when not using app style)
 
@@ -203,7 +203,7 @@ void InputStyle(GoldStyle &style)
    style.sell = InpSellSideColor;
    style.line = InpLineStyle;
    style.width = InpLineStyle == STYLE_SOLID ? InpLineWidth : 1; // MT5 draws dashes only at width 1
-   style.fill = false;
+   style.fill = true;
    style.labels = true;
    style.strength = true;
 }
