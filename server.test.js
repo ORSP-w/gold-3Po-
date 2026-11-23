@@ -457,11 +457,14 @@ test('footprint rows follow the broker tick size MT5 reports, not a fixed 0.1', 
   const live = ticks.map((t, i) => ({ ...t, sequence: 100 + i, timestamp: '2026-11-17T15:0' + (5 + i) + ':00.000Z' }));
   await send('live-batch', { spec: { tickSize: -1 }, ticks: [live[0]] });
   assert.deepEqual(await rows(), [2648.14, 2648.11], 'an invalid spec does not replace the valid one');
+  // A batch that leaves the field out (an older connector) does not wipe a size another batch reported.
+  await send('live-batch', { ticks: [{ ...live[1], sequence: 150, timestamp: '2026-11-17T15:07:00.000Z' }] });
+  assert.deepEqual(await rows(), [2648.14, 2648.11], 'a batch without the spec field keeps the broker grid');
   // Zones and bar heuristics stay on the analysis grid: only the footprint rows follow the broker tick.
   const zonesFine = (await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json()).zones;
-  // A batch without a spec (another broker, or a connector that reports none) clears the stored one.
-  await send('live-batch', { ticks: [live[1]] });
-  assert.equal((await rows()).length, 1, 'a batch without a spec returns the rows to the default grid');
+  // An explicit null (a session whose broker gave no tick size) clears the stored one.
+  await send('live-batch', { spec: null, ticks: [{ ...live[1], sequence: 160, timestamp: '2026-11-17T15:08:00.000Z' }] });
+  assert.equal((await rows()).length, 1, 'spec: null returns the rows to the default grid');
   const zonesDefault = (await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json()).zones;
   assert.deepEqual(zonesFine, zonesDefault, 'the broker tick size does not move the zones');
 });

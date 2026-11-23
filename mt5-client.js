@@ -1,3 +1,4 @@
+import { tickSizeNote } from './mt5-status.js';
 const $ = id => document.getElementById(id);
 const bridge = window.goldMt5;
 let symbol = 'XAUUSD';
@@ -16,7 +17,7 @@ function render(status) {
     window.dispatchEvent(new CustomEvent('mt5-symbol-change'));
   }
   const tick = status.lastTick ? new Date(status.lastTick).toLocaleString() : '';
-  const note = connected ? `${status.message} Уровней: ${status.zoneCount ?? 0}.${tick ? ` Последний тик: ${tick}.` : ''}` : status.message;
+  const note = connected ? `${status.message} Уровней: ${status.zoneCount ?? 0}.${tick ? ` Последний тик: ${tick}.` : ''}${tickSizeNote(status)}` : status.message;
   detail.textContent = indicatorNotice ? `${indicatorNotice} ${note}` : note;
   const label = connected ? `MT5 · ${status.symbol}` : status.state === 'connecting' ? 'MT5 · подключение…' : 'Подключить MT5';
   $('mt5Open').textContent = label;

@@ -75,7 +75,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const route = historical ? 'history' : 'live-batch';
       const send = () => fetchApi(`/v1/ingest/mt5/${route}`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, ...(owner.spec ? { spec: owner.spec } : {}), ticks: records.slice(i, i + 1000) })
+        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, spec: owner.spec ?? null, ticks: records.slice(i, i + 1000) })
       });
       let response = await send();
       if (response.status === 409 && !historical) {

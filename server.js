@@ -14,7 +14,7 @@ import { createPatternStore } from './pattern-store.js';
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_EVENTS = 1000000;
-const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/zone-labels.js': ['zone-labels.js', 'text/javascript; charset=utf-8'], '/chart-scale.js': ['chart-scale.js', 'text/javascript; charset=utf-8'], '/footprint-engine.js': ['footprint-engine.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/c3po.png': ['c3po.png', 'image/png'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'], '/setups-client.js': ['setups-client.js', 'text/javascript; charset=utf-8'], '/settings-client.js': ['settings-client.js', 'text/javascript; charset=utf-8'], '/assets/atmosphere.jpg': ['assets/atmosphere.jpg', 'image/jpeg'], '/mt5-client.js': ['mt5-client.js', 'text/javascript; charset=utf-8'] };
+const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'], '/zone-labels.js': ['zone-labels.js', 'text/javascript; charset=utf-8'], '/chart-scale.js': ['chart-scale.js', 'text/javascript; charset=utf-8'], '/footprint-engine.js': ['footprint-engine.js', 'text/javascript; charset=utf-8'], '/market-data.js': ['market-data.js', 'text/javascript; charset=utf-8'], '/market-client.js': ['market-client.js', 'text/javascript; charset=utf-8'], '/research-client.js': ['research-client.js', 'text/javascript; charset=utf-8'], '/market-engine.js': ['market-engine.js', 'text/javascript; charset=utf-8'], '/styles.css': ['styles.css', 'text/css; charset=utf-8'], '/c3po.png': ['c3po.png', 'image/png'], '/license-client.js': ['license-client.js', 'text/javascript; charset=utf-8'], '/setups-client.js': ['setups-client.js', 'text/javascript; charset=utf-8'], '/settings-client.js': ['settings-client.js', 'text/javascript; charset=utf-8'], '/assets/atmosphere.jpg': ['assets/atmosphere.jpg', 'image/jpeg'], '/mt5-client.js': ['mt5-client.js', 'text/javascript; charset=utf-8'], '/mt5-status.js': ['mt5-status.js', 'text/javascript; charset=utf-8'] };
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
@@ -109,9 +109,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   }
   // Broker symbol specifications (tick size) reported by the MT5 connector with each tick batch.
   // Only gold symbols are stored and the map is capped, so the ingest token cannot grow it without
-  // bound. A batch without a spec clears the stored one, so after a reconnect to a broker that does
-  // not report a tick size (or an older connector) rows fall back to the default instead of keeping
-  // the previous broker's grid.
+  // bound. A batch with spec: null clears the stored one, so after a reconnect to a broker that does
+  // not report a tick size rows fall back to the default instead of keeping the previous broker's grid.
   const symbolSpecs = new Map();
   const SYMBOL_SPECS_MAX = 16;
   function rememberSpec(source, symbol, spec) {
@@ -120,7 +119,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (!isGoldSymbol(source, name)) return;
     const key = source + ':' + name;
     const tickSize = Number(spec?.tickSize);
-    if (spec === undefined || spec === null) { symbolSpecs.delete(key); return; }
+    // Only an explicit null clears: the MT5 session sends it when the broker gave no tick size. A batch
+    // without the field (an older connector) leaves a size another batch reported alone.
+    if (spec === undefined) return;
+    if (spec === null) { symbolSpecs.delete(key); return; }
     if (!Number.isFinite(tickSize) || tickSize <= 0 || tickSize > 100) return;
     if (!symbolSpecs.has(key) && symbolSpecs.size >= SYMBOL_SPECS_MAX) symbolSpecs.delete(symbolSpecs.keys().next().value);
     symbolSpecs.set(key, { tickSize });
