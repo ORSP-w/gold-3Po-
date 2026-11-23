@@ -410,6 +410,20 @@ try {
   assert.ok(wide.chart <= wide.wrap * 1.05, 'dense history must be compressed into the 4K panel instead of a multi-screen scroll strip');
   assert.ok(wide.chart / wide.bars >= 2, 'bars never get thinner than the 4K pitch');
   await page.screenshot({ path:'artifacts/market-lab-4k.png', fullPage:true });
+
+  // The live forming bar uses the broker tick size the server built the bars on, not a fixed 0.1:
+  // once MT5 reports 0.01, a streamed tick at 2700.43 keeps its own row instead of rounding to 2700.40.
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const specTick = { timestamp: new Date().toISOString(), sequence: Date.now(), bid: 2700.42, ask: 2700.44, last: 2700.41, tickVolume: 1, realVolume: 0, flags: 0 };
+  const specResponse = await fetch(base + '/v1/ingest/mt5/live-batch', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', spec: { tickSize: 0.01 }, ticks: [specTick] }) });
+  assert.equal(specResponse.status, 202, 'a live batch with the broker tick size is accepted');
+  await page.waitForFunction(() => document.querySelectorAll('#footprintGrid .price-level').length && [...document.querySelectorAll('#footprintGrid .price-level')].some(node => /2[\s\u00a0]?700,41/.test(node.textContent)), null, { timeout: 8000 });
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('market-tick', { detail: { timestamp: new Date().toISOString(), last: 2700.43, aggressorSide: 'buy', tickVolume: 2, realVolume: 0 } })));
+  await page.waitForTimeout(600);
+  const liveRows = await page.evaluate(() => [...document.querySelectorAll('#footprintGrid .price-level')].map(node => node.textContent.replace(/[\s\u00a0]/g, '')));
+  assert.ok(liveRows.includes('2700,43'), 'the forming bar must keep 2700.43 on the broker 0.01 grid, rows: ' + liveRows.join(' '));
+  assert.ok(!liveRows.includes('2700,40'), 'the live tick must not be rounded onto the 0.1 grid');
+
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
   process.stdout.write('Browser checks passed: empty state, chart, footprint (POC, value area, profile, delta row, live tick), zones, replay, backtest, risk planner, setup library, settings, live MT5/COMEX status and mobile overflow.\n');
 } finally {
