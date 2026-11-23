@@ -10,10 +10,10 @@ export function snapshotPath(commonDataPath, symbol) {
   return path.join(commonDataPath, 'Files', 'GOLD3PO', `${symbol}.csv`);
 }
 
-export const DEFAULT_STYLE = Object.freeze({ buyColor: '#FF0000', sellColor: '#FF0000', lineStyle: 'solid', lineWidth: 2, fill: false, showLabels: true, showStrength: true });
+export const DEFAULT_STYLE = Object.freeze({ buyColor: '#99FFE4', sellColor: '#FF8080', lineStyle: 'solid', lineWidth: 2, fill: true, showLabels: true, showStrength: true });
 const LINE_STYLES = ['solid', 'dash', 'dot', 'dashdot', 'dashdotdot'];
 
-// Settings come from the local service; anything unexpected falls back to the default red solid line.
+// Settings come from the local service; unexpected values fall back to distinct, lightly filled buy/sell zones.
 export function normalizeStyle(style = {}) {
   const s = { ...DEFAULT_STYLE, ...(style && typeof style === 'object' ? style : {}) };
   const hex = (v, d) => /^#[0-9A-Fa-f]{6}$/.test(String(v)) ? String(v).toUpperCase() : d;
