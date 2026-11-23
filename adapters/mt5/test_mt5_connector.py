@@ -118,10 +118,10 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual(self.connect()["error"], "terminal_mismatch")
         self.assertNotIn("login", [call[0] for call in self.api.calls])
 
-    def test_requires_confirmed_account_and_symbol(self):
+    def test_uses_the_account_already_open_in_mt5_and_requires_a_gold_symbol(self):
         self.api.account.login = 9876
-        self.assertEqual(self.connect()["error"], "account_mismatch")
-        self.api.account.login = 1234
+        result = self.connect()
+        self.assertEqual(result["accountLogin"], "9876", "the connector reports, but never changes, the active account")
         self.api.select_ok = False
         self.assertEqual(self.connect()["error"], "symbol_select_failed")
         self.assertEqual(self.command("history")["error"], "not_connected")
