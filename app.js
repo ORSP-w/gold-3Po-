@@ -169,11 +169,10 @@ function renderFootprint(){
   const levelRows=Array.isArray(b.levels)?b.levels:[];
   const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
   let content='',cls='';
-  // A row with only unclassified ticks has no bid/ask split to show, so it stays blank rather than "· ·".
-  if(mode==='bidask'){const cell=footprintCell(v,'bidask');content=showNumbers?(cell.text==='·'?'·':cell.text?`<span>${v.bid}</span><span>${v.ask}</span>`:''):'';cls='bidask';}
-  if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
-  // The value modes share one definition with the engine, so a row without a known side reads the same in all of them.
-  if(mode==='delta'||mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
+  // Every display mode uses the engine's single cell contract; Bid/Ask keeps its two-column visual split.
+  const cell=footprintCell(v,mode);
+  if(mode==='bidask'){content=showNumbers?(cell.text==='·'?'·':cell.text?`<span>${v.bid}</span><span>${v.ask}</span>`:''):'';cls='bidask';}
+  else {content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
   if(imbalance)cls+=' imbalance-'+imbalance;
   if(isPoc)cls+=' foot-poc';
   if(inVa)cls+=' foot-va';
