@@ -314,13 +314,14 @@ try {
   assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
   assert.match(await page.locator('#licenseStatus').innerText(), /НЕ ТРЕБУЕТСЯ/, 'licence row must reflect the CI dev mode');
 
-  // MT5 connection dialog exists and degrades safely outside Electron (no bridge).
+  // MT5 auto-connect dialog contains no credential form and degrades safely outside Electron.
   await page.locator('#mt5Open').click();
   await page.waitForSelector('#mt5Dialog[open]');
-  assert.ok(await page.locator('#mt5Terminal').count() === 1, 'terminal path field must exist');
-  assert.ok(await page.locator('#mt5Password').getAttribute('type') === 'password', 'password field must be masked');
+  assert.equal(await page.locator('#mt5Connect').innerText(), 'Найти и подключить MT5');
+  assert.ok(await page.locator('#mt5InstallIntegration').count() === 1, 'the auto-repair action must exist');
+  assert.equal(await page.locator('#mt5Terminal, #mt5Password, #mt5Form').count(), 0, 'no account credentials or manual terminal path may be requested');
   assert.ok(await page.locator('#mt5Connect').isDisabled(), 'connect must be disabled without the desktop bridge');
-  assert.match(await page.locator('#mt5Detail').innerText(), /настольном приложении/, 'browser mode must explain the desktop-only login');
+  assert.match(await page.locator('#mt5Detail').innerText(), /настольной версии/, 'browser mode must explain that MT5 discovery runs in the desktop app');
   await page.locator('#mt5Close').click();
 
   // Settings sheet: zone finder + MT5 drawing style are saved server-side and reach the zones endpoint.
