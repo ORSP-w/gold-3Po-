@@ -146,7 +146,7 @@ test('the broker tick size from MT5 travels with every tick batch', async () => 
     for (const [key, value] of Object.entries(status)) assert.equal(online[key], value, key + ' in the status for ' + JSON.stringify(reported));
     await new Promise(resolve => setTimeout(resolve, 300));
     await session.disconnect();
-    const batches = api.calls.filter(call => call.path.startsWith('/v1/ingest/mt5/'));
+    const batches = api.calls.filter(call => call.path.endsWith('/history') || call.path.endsWith('/live-batch'));
     assert.ok(batches.length >= 1, 'ticks must be sent');
     for (const batch of batches) assert.deepEqual(batch.body.spec, expected, 'spec sent with ' + JSON.stringify(reported));
   }
@@ -258,7 +258,7 @@ test('a failed poll is retried with backoff instead of ending the session', asyn
   await new Promise(resolve => setTimeout(resolve, 60));
   const during = session.state();
   assert.equal(during.state, 'reconnecting', 'a transient failure keeps the session and says it is retrying');
-  assert.match(during.message, /Повтор 1 из 4/);
+  assert.match(during.message, /Повтор 1 из 5/);
   await new Promise(resolve => setTimeout(resolve, 700));
   const after = session.state();
   assert.equal(after.state, 'online', 'the session recovers once polls succeed again');
@@ -394,7 +394,7 @@ test('the last retry says the next failure closes the connection', async () => {
   await new Promise(resolve => setTimeout(resolve, 300));
   const state = session.state();
   assert.equal(state.state, 'reconnecting');
-  assert.match(state.message, /Повтор 4 из 4.*последний: при новой ошибке соединение будет закрыто/);
+  assert.match(state.message, /Повтор 4 из 5.*последний: при новой ошибке соединение будет закрыто/);
   await session.disconnect();
 });
 

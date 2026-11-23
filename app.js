@@ -87,9 +87,14 @@ function renderChart(){
  const wrapWidth=Math.max(320,Math.round((chart.parentElement?.clientWidth||960)-16));
  const scale=chartScale({panelWidth:wrapWidth,bars:bars.length,left,zoom:horizontalZoom});
  const width=scale.width, step=scale.step, svgWidth=scale.svgWidth;
- const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length){setEmptyState(true);return;}
- const rawMin=Math.min(...allPrices),rawMax=Math.max(...allPrices),rawRange=Math.max(0.01,rawMax-rawMin+2),center=(rawMin+rawMax)/2;
- const visibleRange=rawRange/verticalZoom,min=center-visibleRange/2,max=center+visibleRange/2;
+ const allPrices=bars.flatMap(b=>[b.h,b.l]);
+ // Include every plotted liquidity zone in the visible price extent. Otherwise zones above/below
+ // the candle range are clipped by the chart's auto-scale and appear to be missing in MT5 parity checks.
+ if(showZones)for(const zone of zones){if(Number.isFinite(Number(zone.high)))allPrices.push(Number(zone.high));if(Number.isFinite(Number(zone.low)))allPrices.push(Number(zone.low));}
+ if(!allPrices.length){setEmptyState(true);return;}
+ const rawMin=Math.min(...allPrices),rawMax=Math.max(...allPrices),rawRange=Math.max(0.01,rawMax-rawMin),padding=Math.max(0.02,rawRange*.04),center=(rawMin+rawMax)/2;
+ const paddedRange=rawRange+padding*2;
+ const visibleRange=paddedRange/verticalZoom,min=center-visibleRange/2,max=center+visibleRange/2;
  const x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(1,Math.min(26,step*.62));
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);
  let html=''; for(let p=Math.ceil(min/gridStep)*gridStep;p<=max;p+=gridStep)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,gridStep<1?2:gridStep<10?1:0)}</text>`;
@@ -164,11 +169,10 @@ function renderFootprint(){
   const levelRows=Array.isArray(b.levels)?b.levels:[];
   const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
   let content='',cls='';
-  // A row with only unclassified ticks has no bid/ask split to show, so it stays blank rather than "· ·".
-  if(mode==='bidask'){content=showNumbers&&(v.bid||v.ask)?`<span>${v.bid}</span><span>${v.ask}</span>`:'';cls='bidask';}
-  if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
-  // The value modes share one definition with the engine, so a row without a known side reads the same in all of them.
-  if(mode==='delta'||mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
+  // Every display mode uses the engine's single cell contract; Bid/Ask keeps its two-column visual split.
+  const cell=footprintCell(v,mode);
+  if(mode==='bidask'){content=showNumbers?(cell.text==='·'?'·':cell.text?`<span>${v.bid}</span><span>${v.ask}</span>`:''):'';cls='bidask';}
+  else {content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
   if(imbalance)cls+=' imbalance-'+imbalance;
   if(isPoc)cls+=' foot-poc';
   if(inVa)cls+=' foot-va';

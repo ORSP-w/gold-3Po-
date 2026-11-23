@@ -412,13 +412,23 @@ try {
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
   // Плотная история: на 4K панель должна вмещать серию, а не растягивать её в ленту.
-  const denseTicks = Array.from({ length: 600 }, (_, i) => {
-    const at = new Date(Date.now() - (600 - i) * 15 * 60000);
-    const px = 2650 + Math.sin(i / 9) * 4 + i * 0.02;
-    return { timestamp: at.toISOString(), sequence: 100000 + i, bid: +px.toFixed(2), ask: +(px + 0.2).toFixed(2), last: +(px + 0.1).toFixed(2), tickVolume: 1, realVolume: 0, flags: 0 };
+  // Three trades per 15-minute bar create OHLC bodies in both directions plus a traded
+  // extreme outside each body, so both candle edges and wick rows are exercised.
+  const denseTicks = Array.from({ length: 1800 }, (_, n) => {
+    const i = Math.floor(n / 3), tickInBar = n % 3;
+    const at = new Date(Date.now() - (600 - i) * 15 * 60000 + tickInBar * 15000);
+    const basePrice = 2650 + Math.sin(i / 9) * 4 + i * 0.02;
+    const close = basePrice + (i % 2 ? -0.3 : 0.3);
+    const extreme = basePrice + (i % 2 ? -0.5 : 0.5);
+    const px = tickInBar === 0 ? basePrice : tickInBar === 1 ? extreme : close;
+    return { timestamp: at.toISOString(), sequence: 100000 + n, bid: +(px - 0.1).toFixed(2), ask: +(px + 0.1).toFixed(2), last: +px.toFixed(2), tickVolume: 1, realVolume: 0, flags: 0 };
   });
-  const denseResponse = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: denseTicks }) });
-  assert.equal(denseResponse.status, 202, 'dense history fixture should be accepted');
+  // History ingestion is intentionally capped at 1,000 ticks per request; send the 1,200-tick
+  // fixture as bounded batches so the browser test exercises the real ingestion contract.
+  for (let offset = 0; offset < denseTicks.length; offset += 1000) {
+    const denseResponse = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: denseTicks.slice(offset, offset + 1000) }) });
+    assert.equal(denseResponse.status, 202, 'dense history fixture batch should be accepted');
+  }
   await page.setViewportSize({ width: 3840, height: 2160 });
   await page.waitForFunction(() => document.querySelectorAll('.candle').length >= 600, null, { timeout: 8000 });
   await page.waitForTimeout(400);
@@ -457,7 +467,7 @@ try {
     const cells = [...document.querySelectorAll('#footprintGrid .foot-cell')];
     const forming = cells.filter(cell => cell.classList.contains('foot-forming'));
     const first = document.querySelector('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times) .foot-cell');
-    const state = window.gold3poBarsForTest?.() ?? null;
+    
     return {
       body: cells.filter(cell => cell.classList.contains('candle-body')).length,
       wick: cells.filter(cell => cell.classList.contains('candle-wick')).length,
@@ -465,13 +475,15 @@ try {
       up: cells.filter(cell => cell.classList.contains('candle-body') && cell.classList.contains('candle-up')).length,
       down: cells.filter(cell => cell.classList.contains('candle-body') && cell.classList.contains('candle-down')).length,
       formingBody: forming.filter(cell => cell.classList.contains('candle-body')).length,
-      firstOpacity: first ? getComputedStyle(first).backgroundColor : null
+
     };
   });
   // The fixtures are nearly flat bars, so the body/wick/blank split itself is unit tested in
   // footprint-candle.test.js; here it is enough that the drawn ladder carries the parts.
   assert.ok(candles.body > 0 && candles.out > 0, 'the ladder marks body rows and blank rows: ' + JSON.stringify(candles));
-  assert.ok(candles.up > 0, 'body edges follow the bar direction');
+  assert.ok(candles.up > 0, 'body edges follow the up-bar direction');
+  assert.ok(candles.down > 0, 'body edges follow the down-bar direction');
+  assert.ok(candles.wick > 0, 'traded rows outside candle bodies are rendered as wicks');
   assert.equal(candles.formingBody > 0, true, 'the forming column has a body too');
 
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
