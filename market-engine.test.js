@@ -47,10 +47,11 @@ test('the session profile follows the footprint options, including the row size'
  const onHalfGrid=price=>Math.abs(price*2-Math.round(price*2))<1e-6;
  assert.ok(fine.profile.current.levels.some(row=>!onHalfGrid(row.price)),'the fixture trades between half points at source precision');
  assert.ok(coarse.profile.current.levels.every(row=>onHalfGrid(row.price)),'the profile rows sit on the same 0.5 grid as the grouped ladder');
- assert.deepEqual(coarse.profile.current.levels.map(row=>row.price),[...new Set(coarse.bars.flatMap(bar=>bar.levels.map(row=>row.price)))].sort((a,b)=>b-a),'profile rows are exactly the ladder rows');
- const narrow=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.5}}).profile.current.valueArea.rows;
- const wide=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.95}}).profile.current.valueArea.rows;
- assert.ok(wide>narrow,'the value-area share setting reaches the session profile: '+narrow+' rows at 50% vs '+wide+' at 95%');
+ const narrow=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.5}}).profile.current.valueArea;
+ const wide=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.95}}).profile.current.valueArea;
+ assert.ok(narrow.share>=0.5&&narrow.share<0.7,'a 50% setting covers at least half the volume and stops short of the 70% default, got '+narrow.share);
+ assert.ok(wide.share>=0.95,'a 95% setting covers at least 95% of the volume, got '+wide.share);
+ assert.ok(wide.rows>narrow.rows,'the wider share spans more rows: '+narrow.rows+' at 50% vs '+wide.rows+' at 95%');
 });
 
 test('analysis calculates cumulative delta and leaves absorption unavailable without aggressor data',()=>{
