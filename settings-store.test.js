@@ -27,7 +27,10 @@ test('settings persist across restarts and a broken file falls back to defaults'
     assert.equal(again.zones.pivotWidth, 3);
     assert.equal(JSON.parse(await readFile(file, 'utf8')).zones.pivotWidth, 3);
     await writeFile(file, '{not json');
-    assert.equal((await createSettingsStore({ file }).get()).mt5.buyColor, '#FF0000');
+    const reset = (await createSettingsStore({ file }).get()).mt5;
+    assert.equal(reset.buyColor, '#99FFE4');
+    assert.equal(reset.sellColor, '#FF8080');
+    assert.equal(reset.fill, true);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
