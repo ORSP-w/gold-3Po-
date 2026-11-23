@@ -77,3 +77,31 @@ test('invalid input is rejected', () => {
   assert.throws(() => chartScale({ panelWidth: 1200, bars: -1 }), /bars/);
   assert.throws(() => minBarWidth(-10), /paneWidth/);
 });
+
+
+import { priceViewport, zoomPriceViewport, panPriceViewport } from './chart-scale.js';
+
+test('price-axis zoom keeps the price under the cursor fixed', () => {
+  const before = priceViewport({ low: 2600, high: 2700, zoom: 1, offset: 0 });
+  const anchorRatio = 0.2;
+  const anchor = before.max - before.range * anchorRatio;
+  const next = zoomPriceViewport({ low: 2600, high: 2700, zoom: 1, nextZoom: 2, offset: 0, anchorRatio });
+  const after = priceViewport({ low: 2600, high: 2700, zoom: next.zoom, offset: next.offset });
+  assert.ok(Math.abs((after.max - after.range * anchorRatio) - anchor) < 1e-9);
+  assert.equal(next.zoom, 2);
+});
+
+test('price-axis drag pans in the direction of the drag', () => {
+  const before = priceViewport({ low: 2600, high: 2700, zoom: 1 });
+  const offset = panPriceViewport({ low: 2600, high: 2700, zoom: 1, deltaPixels: 40, plotHeight: 315 });
+  const after = priceViewport({ low: 2600, high: 2700, zoom: 1, offset });
+  assert.ok(after.center < before.center, 'dragging down moves the visible price range lower');
+  assert.ok(Math.abs((before.range - after.range)) < 1e-9, 'panning does not change the zoom');
+});
+
+test('price viewport validates bounds and clamps zoom', () => {
+  assert.throws(() => priceViewport({ low: 2, high: 1 }), /ordered/);
+  assert.throws(() => zoomPriceViewport({ low: 1, high: 2, anchorRatio: 2 }), /anchorRatio/);
+  const result = zoomPriceViewport({ low: 1, high: 2, zoom: 1, nextZoom: 99 });
+  assert.equal(result.zoom, 8);
+});
