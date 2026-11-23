@@ -2,28 +2,21 @@
 
 Two integration paths exist:
 
-- **App-side connection (recommended):** sign in from the GOLD-3Po window
-  («Подключить MT5»). The bundled standalone connector (`mt5-runtime/gold3po-mt5/gold3po-mt5.exe`,
-  built from `mt5_connector.py`) attaches to your broker terminal via the official
-  MetaTrader5 Python API, streams gold ticks into the local API and publishes
-  dynamic levels to `Common\Files\GOLD3PO\<SYMBOL>.csv`. The separate custom
-  indicator **`Gold3PoLevels.mq5`** reads that file and draws the levels on the
-  chart — no WebRequest, no DLL, no trading. See `docs/MT5-CONNECT.md`.
-- **EA bridge (this document):** `Gold3PoBridge.mq5` uploads up to 90 days of
-  broker tick history plus live quotes over HTTP and can also draw zones itself.
-  Use it for deep historical backfill; it never reads or transmits the account password.
+- **App-side connection (recommended):** on startup GOLD-3Po finds the already-running `terminal64.exe` and attaches with the official MetaTrader5 Python API. It verifies the active account and gold symbol without calling `login()`, requesting a password or changing the active account. The bundled connector streams recent/live gold ticks into the local API and publishes levels to `Common\\Files\\GOLD3PO\\<SYMBOL>.csv`. The custom indicator **`Gold3PoLevels.mq5`** reads that file and draws levels — no WebRequest or DLL is needed for the indicator.
+- **EA bridge:** `Gold3PoBridge.mq5` uploads deeper broker tick history (up to 90 days; 30 by default) and can draw zones itself. It complements the app-side live feed; with `AppConnectionFeedsLive=true`, it does not send duplicate live ticks.
 
-The Expert Advisor (EA) runs inside the user's logged-in MetaTrader 5 terminal. It never reads or transmits the trading account password. The terminal must be logged into the intended RoboForex server/account and have the target instrument (normally XAUUSD) selected.
+The EA never reads or transmits the trading account password. The terminal must already be logged in to the intended broker account and have a gold symbol available in Market Watch.
 
 ## Install and configure
 
-1. Install and start **GOLD-3Po Market Lab**. It runs the local API on `http://127.0.0.1:8787`.
-2. In MT5, open **Tools → Options → Expert Advisors → Allow WebRequest for listed URL** and add `http://127.0.0.1:8787`.
-3. Open the installed file `resources\adapters\mt5\Gold3PoBridge.mq5` in MetaEditor and compile with F7.
-4. Copy the ingest token from the app: **⚙ Настройки → Отрисовка в MT5 → Мост MT5 → «Скопировать»**. The same value lives in `%APPDATA%\GOLD-3Po Market Lab\settings.json` (`marketIngestToken`) if you ever need it from disk; it is created once and does not change between launches.
-5. Attach **one** EA instance to one XAUUSD chart and paste the copied value into `IngestToken`. Duplicate H1/H4/M15 instances on the same symbol will refuse to start.
-6. Keep `AppConnectionFeedsLive=true` (default) when the desktop MT5 connection is active: the app owns the latest ~8 hours and live stream; the EA backfills older history and draws zones. Set it to `false` only when the EA must be the sole live quote source.
+1. Open MT5 and sign in to the intended broker account as usual. Make sure the broker's gold symbol is available in Market Watch.
+2. Start **GOLD-3Po Market Lab**. It automatically finds the already-running MT5, checks its active account and selects an available `XAUUSD` / `GOLD` symbol. No account login, password or server fields are shown.
+3. On every app launch/update, GOLD-3Po copies `Gold3PoBridge.mq5` to `MQL5\\Experts` and `Gold3PoLevels.mq5` to `MQL5\\Indicators`. If MetaEditor is installed next to that terminal, both sources are compiled automatically. If several terminals are running, the app refuses to guess; leave only the intended terminal open and retry.
+4. The app writes its local ingest token to `Common\\Files\\GOLD3PO\\bridge-token.txt`. The EA reads it automatically when its `IngestToken` input is left blank. Do not copy the account password or token into an EA parameter.
+5. For deep historical backfill, attach one `Gold3PoBridge` EA to one XAUUSD chart. MT5 requires a one-time WebRequest permission: **Tools → Options → Expert Advisors → Allow WebRequest for listed URL**, add `http://127.0.0.1:8787`.
+6. Keep `AppConnectionFeedsLive=true` (default): the app owns the recent ~8-hour live stream; the EA fills older history and can draw zones. The app installs/compiles the EA but does not silently attach it to a chart. One attachment is a one-time MT5 action.
 7. Check `http://127.0.0.1:8787/health` and the MT5 Experts tab for the preflight result.
+
 
 ## Data flow and recovery
 
