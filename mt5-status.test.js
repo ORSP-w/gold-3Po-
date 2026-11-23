@@ -15,7 +15,7 @@ test('the MT5 panel states the broker tick size or why it is missing', () => {
 test('the MT5 panel renders the tick size note and the module is served and packaged', async () => {
   const client = await readFile(new URL('./mt5-client.js', import.meta.url), 'utf8');
   assert.match(client, /import \{ tickSizeNote \} from '\.\/mt5-status\.js'/);
-  assert.match(client, /\$\{tickSizeNote\(status\)\}/, 'the connected status line includes the note');
+  assert.match(client, /connected \? tickSizeNote\(status\)/, 'the connected status line includes the note');
   const server = await readFile(new URL('./server.js', import.meta.url), 'utf8');
   assert.match(server, /'\/mt5-status\.js': \['mt5-status\.js'/, 'the browser can load the module');
   const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
