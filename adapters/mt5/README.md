@@ -22,7 +22,7 @@ The EA never reads or transmits the trading account password. The terminal must 
 
 - At startup the EA schedules up to 90 days (30 by default) of broker tick history using hourly `CopyTicksRange` windows. With the desktop feed enabled, backfill stops 8 hours before now so it does not duplicate the recent ticks already supplied by the app.
 - The EA is single-instance per symbol (terminal-global lock); attach it once, not to H1/H4/M15 simultaneously. A second instance exits with an explicit Experts-tab message.
-- Historical upload defaults to 200 ticks per batch with a 15-second request timeout. On WebRequest transport failure the batch is reduced (down to 50) and retried with backoff.
+- Historical upload defaults to 1,000 ticks per batch with a 5-second request timeout. On WebRequest transport failure the batch is reduced (down to 50) and retried with backoff.
 - By default `AppConnectionFeedsLive=true`: the desktop connector owns recent/live ticks; the EA owns deep historical backfill and optional zone drawing. Set it to `false` only when the EA alone should send live quotes.
 - When standalone live delivery is enabled, ticks remain queued through HTTP errors and retry with backoff. The queue is capped at 20,000 ticks.
 - The terminal must remain open and connected. MT5 WebRequest is synchronous; a slow API can delay the EA's event processing. The local API binds only to loopback.
