@@ -421,8 +421,12 @@ try {
     const px = basePrice + (closeTick ? (i % 2 ? -0.3 : 0.3) : 0);
     return { timestamp: at.toISOString(), sequence: 100000 + n, bid: +(px - 0.1).toFixed(2), ask: +(px + 0.1).toFixed(2), last: +px.toFixed(2), tickVolume: 1, realVolume: 0, flags: 0 };
   });
-  const denseResponse = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: denseTicks }) });
-  assert.equal(denseResponse.status, 202, 'dense history fixture should be accepted');
+  // History ingestion is intentionally capped at 1,000 ticks per request; send the 1,200-tick
+  // fixture as bounded batches so the browser test exercises the real ingestion contract.
+  for (let offset = 0; offset < denseTicks.length; offset += 1000) {
+    const denseResponse = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks: denseTicks.slice(offset, offset + 1000) }) });
+    assert.equal(denseResponse.status, 202, 'dense history fixture batch should be accepted');
+  }
   await page.setViewportSize({ width: 3840, height: 2160 });
   await page.waitForFunction(() => document.querySelectorAll('.candle').length >= 600, null, { timeout: 8000 });
   await page.waitForTimeout(400);
