@@ -192,6 +192,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.worker.stop();
       await owner.levelWrite?.catch(() => {});
       if (owner.commonDataPath) await publish(owner.commonDataPath, owner.symbol, [], owner.cachedStyle).catch(() => {});
+      await fetchApi('/v1/ingest/mt5/spec/reset', { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ source: 'mt5', symbol: owner.symbol }) }).catch(() => {});
     }
     if (!session) status = { state: 'offline', symbol: owner?.symbol, message };
     return state();
