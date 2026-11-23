@@ -106,7 +106,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
         await response.json();
       } catch (error) {
         if (!historical) owner.unsent = records.slice(i);
-        throw error;
+        throw new Error(`MT5 ${route}: пакет из ${records.length-i} тиков сохранён в очереди для повторной отправки: ${error.message}`, { cause: error });
       }
     }
     return records.length;
@@ -125,7 +125,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     } else if (!changed) {
       const response = await fetchApi('/v1/license/status');
       // An answered "not valid" ends the session at once; only an unreachable service is retried.
-      const body = await response.json().catch(() => null);
+      const body = await response.json();
       if (response.status === 402 || body?.valid === false) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
       // An unreachable service, or an answer that cannot be read, is a failed check: it never counts as valid.
       if (!response.ok || body?.valid !== true) throw new Error('Не удалось проверить лицензию.');
@@ -168,7 +168,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.failures = (owner.failures || 0) + 1;
       if (owner.failures >= maxFailures || owner.worker.stopped?.()) { await disconnect(error.message); return; }
       delay = Math.min(pollMs * 2 ** owner.failures, maxBackoffMs);
-      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures - 1} через ${Math.round(delay / 1000)} с${owner.failures === maxFailures - 1 ? ', последний: при новой ошибке соединение будет закрыто' : ''}.` });
+      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures} через ${Math.round(delay / 1000)} с${owner.failures === maxFailures - 1 ? ', последний: при новой ошибке соединение будет закрыто' : ''}.` });
     } finally {
       if (session === owner) owner.timer = setTimeout(() => void poll(owner), delay);
     }
