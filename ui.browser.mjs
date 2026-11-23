@@ -109,6 +109,17 @@ try {
   assert.equal(await page.locator('.foot-delta').count(), await page.locator('.bar-head').count(), 'one delta cell per bar');
   assert.equal(await page.locator('.foot-cell.foot-forming').count() > 0, true, 'the forming bar is marked');
   assert.ok(!/Swing high|Prior day|Value area/.test(await page.locator('#footprintGrid').innerText()), 'no engine token leaks into the footprint');
+  // The ladder reads as one continuous grid: cells sit edge to edge with hairline separators, not as
+  // individually bordered and rounded tiles floating apart.
+  const ladder = await page.evaluate(() => {
+    const cell = document.querySelector('.foot-cell');
+    const row = cell.closest('.foot-row');
+    const style = getComputedStyle(cell);
+    return { gap: getComputedStyle(row).columnGap, radius: style.borderTopLeftRadius, border: style.borderTopWidth };
+  });
+  assert.equal(ladder.gap, '0px', 'footprint cells must sit edge to edge, got a ' + ladder.gap + ' gap between them');
+  assert.equal(ladder.radius, '0px', 'footprint cells must not carry rounded tile corners');
+  assert.ok(parseFloat(ladder.border) <= 1, 'footprint cells may only carry a hairline separator');
 
   // Real time: a streamed tick lands in the forming bar between refetches, without a reload.
   // The price is outside the fixture range, so a new price row proves the tick was applied.
