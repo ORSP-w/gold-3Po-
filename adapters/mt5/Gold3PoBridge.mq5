@@ -45,28 +45,32 @@ string g_ingestToken = "";
 
 bool ResolveIngestToken()
 {
+   // The current desktop-app token is authoritative. This deliberately overrides an
+   // older value saved in the EA's chart inputs after a GOLD-3Po reinstall/update.
+   const int handle = FileOpen("GOLD3PO\\bridge-token.txt", FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
+   if(handle != INVALID_HANDLE)
+   {
+      string sharedToken = FileReadString(handle);
+      FileClose(handle);
+      StringTrimLeft(sharedToken);
+      StringTrimRight(sharedToken);
+      if(StringLen(sharedToken) >= 24)
+      {
+         g_ingestToken = sharedToken;
+         return true;
+      }
+      Print("GOLD-3Po: shared bridge token is present but invalid; checking the explicit IngestToken override.");
+   }
+
+   // Explicit override is retained for a standalone EA connected to a remote API.
    g_ingestToken = IngestToken;
    StringTrimLeft(g_ingestToken);
    StringTrimRight(g_ingestToken);
    if(StringLen(g_ingestToken) >= 24)
       return true;
 
-   const int handle = FileOpen("GOLD3PO\\bridge-token.txt", FILE_READ | FILE_TXT | FILE_ANSI | FILE_COMMON);
-   if(handle == INVALID_HANDLE)
-   {
-      Print("GOLD-3Po: bridge token is not available. Start the GOLD-3Po desktop app and connect its authorised MT5 terminal.");
-      return false;
-   }
-   g_ingestToken = FileReadString(handle);
-   FileClose(handle);
-   StringTrimLeft(g_ingestToken);
-   StringTrimRight(g_ingestToken);
-   if(StringLen(g_ingestToken) < 24)
-   {
-      Print("GOLD-3Po: the shared bridge token is missing or invalid. Reopen GOLD-3Po and run MT5 integration repair.");
-      return false;
-   }
-   return true;
+   Print("GOLD-3Po: bridge token is not available. Start GOLD-3Po or provide IngestToken for a standalone remote API.");
+   return false;
 }
 
 string TickStamp(const long timeMsc)
