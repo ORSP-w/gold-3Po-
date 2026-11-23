@@ -82,13 +82,7 @@
 <div class="row"><span>Показывать силу зоны, %</span><button type="button" class="toggle" id="setStrength" aria-pressed="true"><span class="knob"></span></button></div>
 <p class="settings-hint">Индикатор Gold3PoLevels в MT5 подхватывает изменения в течение ~5 секунд — перезапускать его не нужно.</p>
 <div class="settings-subhead">Мост MT5 · советник Gold3PoBridge</div>
-<p class="settings-hint">Советник в терминале отдаёт историю (до 90 дней) и живые котировки в локальный API. Ему нужны адрес и токен ниже: в MT5 разрешите Tools → Options → Expert Advisors → Allow WebRequest для <code id="bridgeOriginHint">http://127.0.0.1:8787</code>.</p>
-<div id="bridgeBlock" class="bridge-block" hidden>
-<div class="bridge-row"><span>Адрес API</span><code id="bridgeUrl">—</code></div>
-<div class="bridge-row"><span>Токен для IngestToken</span><code id="bridgeToken">—</code><button class="research-button" id="bridgeCopy" type="button">Скопировать</button></div>
-<small>Токен создаётся при первой установке и не меняется между запусками.</small>
-</div>
-<p class="settings-hint" id="bridgeUnavailable">Мост доступен только в настольном приложении GOLD-3Po: в браузере локальный API не запускается.</p>
+<p class="settings-hint">GOLD-3Po автоматически устанавливает и компилирует советник, а его локальный токен передаёт через Common Files. В MT5 один раз разрешите WebRequest для <code>http://127.0.0.1:8787</code>. Для глубокой истории прикрепите советник к одному графику золота.</p>
 </section>
 <section class="settings-pane" data-pane="ui" hidden>
 <div class="field"><div class="field-label">Тема</div><div class="seg" id="setTheme"><button type="button" data-value="glass-dark">Тёмная</button><button type="button" data-value="glass-light">Светлая</button></div></div>
