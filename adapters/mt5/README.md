@@ -62,3 +62,18 @@ Zones are built from several independent sources (swings, the previous day's hig
 - The desktop application and MT5 terminal run on the same machine through localhost. For a shared central feed, deploy the API behind HTTPS and configure the EA URLs to that server.
 - The EA only sends market data. It never submits, modifies or closes orders.
 - The EA source has not been certified against a live RoboForex account in this repository workflow; verify MetaEditor compilation and a demo-account feed before relying on it.
+
+
+## Confirm that liquidity zones are visible on the MT5 chart
+
+For the **recommended app-side connection**:
+
+1. Start GOLD-3Po Market Lab and connect the intended XAUUSD account in the app.
+2. Click **«Установить индикатор зон»** in the MT5 connection dialog. The app copies `Gold3PoLevels.mq5` into the terminal's `MQL5/Indicators` folder and compiles it when MetaEditor is available.
+3. In MT5, open **Navigator → Indicators**, refresh the list, and attach **Gold3PoLevels** to the same XAUUSD chart.
+4. The indicator reads the app's atomic snapshot from `Common\Files\GOLD3PO\<SYMBOL>.csv` and draws both zone boundaries, optional subtle fill, labels and strength. No WebRequest permission is needed for this indicator path.
+5. The top-left chart status should show `Gold3Po <symbol>: N zones`. If it says snapshot missing/stale/unreadable, check the Common Files path and that the desktop connection is still online.
+
+For the **EA bridge path**, attach `Gold3PoBridge.mq5` and allow `http://127.0.0.1:8787` in MT5 WebRequest settings. Keep `DrawZones=true`. The EA's top-left `GOLD-3Po zones: N` status reports how many zone rectangles were created.
+
+Fresh installs now use distinct cyan buy-side and red sell-side zones with a light fill, matching the desktop chart. Existing saved MT5 colours/fill preferences are preserved; change them in **Settings → Отрисовка в MT5**, or reset settings to use the new defaults.
