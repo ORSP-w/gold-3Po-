@@ -396,19 +396,14 @@ try {
   await page.screenshot({ path:'artifacts/settings-mobile.png' });
   await page.locator('#settingsTabs button[data-tab="mt5"]').click();
   await page.waitForTimeout(120);
-  const bridge = await page.evaluate(() => {
-    const block = document.querySelector('#bridgeBlock'), note = document.querySelector('#bridgeUnavailable');
-    return {
-      overflow: document.documentElement.scrollWidth - innerWidth,
-      blockVisible: block ? block.getBoundingClientRect().height > 0 : null,
-      noteVisible: note ? note.getBoundingClientRect().height > 0 : null,
-      token: document.querySelector('#bridgeToken')?.textContent?.trim()
-    };
-  });
+  const bridge = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - innerWidth,
+    paneText: document.querySelector('#settingsDialog .settings-pane[data-pane="mt5"]')?.innerText || '',
+    hasTokenField: Boolean(document.querySelector('#bridgeToken, #bridgeCopy, #bridgeBlock'))
+  }));
   assert.ok(bridge.overflow <= 0, 'the MT5 pane must not overflow a phone width');
-  assert.equal(bridge.blockVisible, false, 'a browser without the desktop bridge must not show a token block');
-  assert.equal(bridge.noteVisible, true, 'the browser must explain why the bridge block is empty');
-  assert.equal(bridge.token, '—', 'web mode must not fake a bridge token');
+  assert.match(bridge.paneText, /токен передаёт через Common Files/i, 'the settings must explain automatic local token hand-off');
+  assert.equal(bridge.hasTokenField, false, 'the renderer must not expose the private bridge token');
   await page.locator('#settingsTabs button[data-tab="zones"]').click();
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
