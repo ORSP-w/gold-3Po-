@@ -113,7 +113,7 @@ class ConnectorTests(unittest.TestCase):
         self.assertNotIn("login", [call[0] for call in self.api.calls])
         self.assertEqual(self.command("poll")["error"], "not_connected")
 
-    def test_wrong_terminal_does_not_receive_login(self):
+    def test_wrong_running_terminal_is_rejected(self):
         self.api.terminal.path = os.path.abspath("Other terminal")
         self.assertEqual(self.connect()["error"], "terminal_mismatch")
         self.assertNotIn("login", [call[0] for call in self.api.calls])
