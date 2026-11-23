@@ -63,10 +63,16 @@ test('publishSnapshot writes atomically into the common files folder', async () 
 function fakeWorker(responses) {
   return () => ({
     stop() {},
-    async request(op) {
+    async request(op, payload = {}) {
       const value = responses[op];
-      if (typeof value === 'function') return value();
+      if (typeof value === 'function') return value(payload);
       if (!value) throw new Error('unexpected op ' + op);
+      if (op === 'connect') return {
+        terminalPath: 'C:\\MT5\\terminal64.exe',
+        accountLogin: '12345',
+        server: 'RoboForex-Demo',
+        ...value
+      };
       return value;
     }
   });
@@ -107,7 +113,7 @@ test('session connects, ingests, publishes zones and clears them on disconnect',
     request: api.request,
     publish: async (common, symbol, zones, style) => { published.push({ symbol, count: zones.length, width: style?.lineWidth }); }
   });
-  const state = await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+  const state = await session.connect();
   assert.equal(state.state, 'online');
   assert.equal(state.symbol, 'XAUUSDM');
   await new Promise(resolve => setTimeout(resolve, 2600));
@@ -142,7 +148,7 @@ test('the broker tick size from MT5 travels with every tick batch', async () => 
       request: api.request,
       publish: async () => {}
     });
-    const online = await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+    const online = await session.connect();
     for (const [key, value] of Object.entries(status)) assert.equal(online[key], value, key + ' in the status for ' + JSON.stringify(reported));
     await new Promise(resolve => setTimeout(resolve, 300));
     await session.disconnect();
@@ -164,7 +170,7 @@ test('session recovers from a live sequence collision', async () => {
     request: api.request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 2600));
   const liveCalls = api.calls.filter(c => c.path === '/v1/ingest/mt5/live-batch');
   assert.ok(liveCalls.length >= 2, 'a 409 must trigger a resequenced resend');
@@ -186,7 +192,7 @@ test('session disconnects when the licence becomes invalid', async () => {
     request: api.request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 2200));
   valid = false;
   await new Promise(resolve => setTimeout(resolve, 2600));
@@ -207,7 +213,7 @@ test('a truncated MT5 history is reported instead of passed off as complete', as
     request: api.request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 2600));
   const state = session.state();
   assert.match(state.message, /неполная/, 'a partial history must be labelled as partial');
@@ -215,18 +221,37 @@ test('a truncated MT5 history is reported instead of passed off as complete', as
   await session.disconnect();
 });
 
-test('session rejects malformed connect input without starting a worker', async () => {
+test('connect attaches to the authenticated terminal without account credentials', async () => {
   let started = false;
+  let connectPayload;
   const session = createMt5Session({
     workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
-    makeWorker: () => { started = true; return fakeWorker({})(); },
-    request: async () => { throw new Error('no network expected'); },
+    makeWorker: () => {
+      started = true;
+      return {
+        stop() {},
+        async request(op, payload) {
+          if (op === 'connect') {
+            connectPayload = payload;
+            return { ok: true, symbol: 'XAUUSD', terminalPath: 'C:\\MT5\\terminal64.exe',
+              accountLogin: '12345', server: 'RoboForex-Demo', commonDataPath: 'C:\\Common',
+              dataPath: 'C:\\Data', specUnavailable: 'not_reported' };
+          }
+          if (op === 'history') return { ok: true, ticks: [] };
+          if (op === 'poll') return { ok: true, ticks: [] };
+          throw new Error('unexpected op ' + op);
+        }
+      };
+    },
+    request: async () => ({ ok: true, status: 200, json: async () => ({ valid: true }) }),
     publish: async () => {}
   });
-  await assert.rejects(() => session.connect({ terminalPath: 'C:\\evil.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' }), /terminal64/);
-  await assert.rejects(() => session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: 'abc', password: 'p', server: 'S', symbol: 'XAUUSD' }), /Заполните/);
-  await assert.rejects(() => session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'EURUSD' }), /Заполните/);
-  assert.equal(started, false);
+  const state = await session.connect();
+  assert.equal(started, true);
+  assert.deepEqual(connectPayload, {}, 'no login, password, server or account selector is sent to the connector');
+  assert.equal(state.state, 'online');
+  assert.equal(state.accountLabel, 'Счёт ···2345 · RoboForex-Demo');
+  await session.disconnect();
 });
 
 test('a connector that is not on disk says so, and names the path', async () => {
@@ -234,7 +259,7 @@ test('a connector that is not on disk says so, and names the path', async () => 
     workerCommand: join('/definitely-missing', 'gold3po-mt5.exe'), workerArgs: [],
     apiOrigin: 'http://127.0.0.1:9', token: 't', publish: async () => {}
   });
-  const state = await session.connect({ terminalPath: '/terminals/terminal64.exe', login: '5000123', password: 'secret', server: 'Broker-Demo', symbol: 'XAUUSD' });
+  const state = await session.connect();
   assert.equal(state.state, 'offline');
   assert.match(state.message, /Модуль подключения MT5 не найден: .*gold3po-mt5\.exe/, 'the window must name the missing module');
   assert.match(state.message, /переустановите приложение/, 'and not send the user looking for a MetaTrader5 package to install');
@@ -254,7 +279,7 @@ test('a failed poll is retried with backoff instead of ending the session', asyn
     request: api.request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 60));
   const during = session.state();
   assert.equal(during.state, 'reconnecting', 'a transient failure keeps the session and says it is retrying');
@@ -278,7 +303,7 @@ test('repeated poll failures end the session with the last reason', async () => 
     request: fakeApi().request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 400));
   const state = session.state();
   assert.equal(state.state, 'offline');
@@ -298,7 +323,7 @@ test('no new ticks for a while marks the feed stale without disconnecting', asyn
     request: fakeApi().request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 80));
   assert.equal(session.state().feed, 'live');
   clock += 61_000;
@@ -317,7 +342,7 @@ test('a connector process that has exited ends the session at once, without retr
     makeWorker: () => ({
       stop() {}, stopped: () => stopped,
       async request(op) {
-        if (op === 'connect') return { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' };
+        if (op === 'connect') return { ok: true, symbol: 'XAUUSD', terminalPath: 'C:\\MT5\\terminal64.exe', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' };
         if (op === 'history') return { ok: true, ticks: [] };
         stopped = true;
         throw new Error('Модуль MT5 закрылся: crash');
@@ -326,7 +351,7 @@ test('a connector process that has exited ends the session at once, without retr
     request: fakeApi().request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 60));
   const state = session.state();
   assert.equal(state.state, 'offline', 'a dead connector cannot answer a retry');
@@ -350,7 +375,7 @@ test('a licence check answering 200 with valid:false ends the session at once', 
     request: licenceApi(() => { checks++; return { ok: true, status: 200, json: async () => ({ valid: false }) }; }),
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 200));
   const state = session.state();
   assert.ok(checks >= 1, 'the licence status endpoint was asked');
@@ -369,7 +394,7 @@ test('an unreadable licence answer is a failed check, never treated as valid', a
     request: licenceApi(() => ({ ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token <'); } })),
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 60));
   assert.notEqual(session.state().state, 'online', 'an unreadable licence answer must not leave the session online');
   await new Promise(resolve => setTimeout(resolve, 600));
@@ -390,7 +415,7 @@ test('the last retry says the next failure closes the connection', async () => {
     request: fakeApi().request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 300));
   const state = session.state();
   assert.equal(state.state, 'reconnecting');
@@ -420,7 +445,7 @@ test('live ticks the service could not take are resent after it recovers', async
     request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 600));
   const expected = [1, 2, 3, 4].map(s => new Date(Date.UTC(2026, 0, 5, 10, 0, s)).toISOString());
   assert.deepEqual(received, expected, 'every polled tick reaches the service once, in order, after the outage');
@@ -450,7 +475,7 @@ test('the resend queue is bounded and says how many ticks it had to drop', async
     request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   const messages = [];
   const watch = setInterval(() => messages.push(session.state().message), 3);
   await new Promise(resolve => setTimeout(resolve, 400));
@@ -486,7 +511,7 @@ test('a 409 whose resend also fails keeps the batch for the next poll', async ()
     request,
     publish: async () => {}
   });
-  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await session.connect();
   await new Promise(resolve => setTimeout(resolve, 300));
   assert.deepEqual(received, [new Date(Date.UTC(2026, 0, 5, 10, 0, 1)).toISOString()], 'the tick from the failed 409 round is sent on the next poll');
   await session.disconnect();

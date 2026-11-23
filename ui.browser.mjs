@@ -314,13 +314,14 @@ try {
   assert.equal(setupsState.activeDefinition.strategy.requireStacked, true, 'applied conditions must persist server-side');
   assert.match(await page.locator('#licenseStatus').innerText(), /НЕ ТРЕБУЕТСЯ/, 'licence row must reflect the CI dev mode');
 
-  // MT5 connection dialog exists and degrades safely outside Electron (no bridge).
+  // MT5 auto-connect dialog contains no credential form and degrades safely outside Electron.
   await page.locator('#mt5Open').click();
   await page.waitForSelector('#mt5Dialog[open]');
-  assert.ok(await page.locator('#mt5Terminal').count() === 1, 'terminal path field must exist');
-  assert.ok(await page.locator('#mt5Password').getAttribute('type') === 'password', 'password field must be masked');
+  assert.equal(await page.locator('#mt5Connect').innerText(), 'Найти и подключить MT5');
+  assert.ok(await page.locator('#mt5InstallIntegration').count() === 1, 'the auto-repair action must exist');
+  assert.equal(await page.locator('#mt5Terminal, #mt5Password, #mt5Form').count(), 0, 'no account credentials or manual terminal path may be requested');
   assert.ok(await page.locator('#mt5Connect').isDisabled(), 'connect must be disabled without the desktop bridge');
-  assert.match(await page.locator('#mt5Detail').innerText(), /настольном приложении/, 'browser mode must explain the desktop-only login');
+  assert.match(await page.locator('#mt5Detail').innerText(), /настольной версии/, 'browser mode must explain that MT5 discovery runs in the desktop app');
   await page.locator('#mt5Close').click();
 
   // Settings sheet: zone finder + MT5 drawing style are saved server-side and reach the zones endpoint.
@@ -395,19 +396,14 @@ try {
   await page.screenshot({ path:'artifacts/settings-mobile.png' });
   await page.locator('#settingsTabs button[data-tab="mt5"]').click();
   await page.waitForTimeout(120);
-  const bridge = await page.evaluate(() => {
-    const block = document.querySelector('#bridgeBlock'), note = document.querySelector('#bridgeUnavailable');
-    return {
-      overflow: document.documentElement.scrollWidth - innerWidth,
-      blockVisible: block ? block.getBoundingClientRect().height > 0 : null,
-      noteVisible: note ? note.getBoundingClientRect().height > 0 : null,
-      token: document.querySelector('#bridgeToken')?.textContent?.trim()
-    };
-  });
+  const bridge = await page.evaluate(() => ({
+    overflow: document.documentElement.scrollWidth - innerWidth,
+    paneText: document.querySelector('#settingsDialog .settings-pane[data-pane="mt5"]')?.innerText || '',
+    hasTokenField: Boolean(document.querySelector('#bridgeToken, #bridgeCopy, #bridgeBlock'))
+  }));
   assert.ok(bridge.overflow <= 0, 'the MT5 pane must not overflow a phone width');
-  assert.equal(bridge.blockVisible, false, 'a browser without the desktop bridge must not show a token block');
-  assert.equal(bridge.noteVisible, true, 'the browser must explain why the bridge block is empty');
-  assert.equal(bridge.token, '—', 'web mode must not fake a bridge token');
+  assert.match(bridge.paneText, /токен передаёт через Common Files/i, 'the settings must explain automatic local token hand-off');
+  assert.equal(bridge.hasTokenField, false, 'the renderer must not expose the private bridge token');
   await page.locator('#settingsTabs button[data-tab="zones"]').click();
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
