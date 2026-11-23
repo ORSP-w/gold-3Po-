@@ -39,6 +39,20 @@ test('timeframe aggregation separates bars and orders ticks chronologically',()=
 });
 test('analysis validates its inputs',()=>assert.throws(()=>buildMarketAnalysis([], {priceStep:0}),/Invalid analysis input/));
 
+test('the session profile follows the footprint options, including the row size',()=>{
+ const events=[];let seq=1;
+ for(let i=0;i<120;i++){const p=2648+(i%23)*0.1;const n=i%7===0?9:1;for(let k=0;k<n;k++)events.push({source:'mt5',symbol:'XAUUSD',timestamp:new Date(Date.UTC(2026,0,5,10,i,k)).toISOString(),sequence:seq++,bid:+(p-0.1).toFixed(2),ask:+(p+0.1).toFixed(2),last:+p.toFixed(2),tickVolume:1,realVolume:0});}
+ const fine=buildMarketAnalysis(events,{footprintOptions:{ticksPerRow:1}});
+ const coarse=buildMarketAnalysis(events,{footprintOptions:{ticksPerRow:5}});
+ const onHalfGrid=price=>Math.abs(price*2-Math.round(price*2))<1e-6;
+ assert.ok(fine.profile.current.levels.some(row=>!onHalfGrid(row.price)),'the fixture trades between half points at source precision');
+ assert.ok(coarse.profile.current.levels.every(row=>onHalfGrid(row.price)),'the profile rows sit on the same 0.5 grid as the grouped ladder');
+ assert.deepEqual(coarse.profile.current.levels.map(row=>row.price),[...new Set(coarse.bars.flatMap(bar=>bar.levels.map(row=>row.price)))].sort((a,b)=>b-a),'profile rows are exactly the ladder rows');
+ const narrow=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.5}}).profile.current.valueArea.rows;
+ const wide=buildMarketAnalysis(events,{footprintOptions:{valueAreaShare:0.95}}).profile.current.valueArea.rows;
+ assert.ok(wide>narrow,'the value-area share setting reaches the session profile: '+narrow+' rows at 50% vs '+wide+' at 95%');
+});
+
 test('analysis calculates cumulative delta and leaves absorption unavailable without aggressor data',()=>{
  const out=buildMarketAnalysis([
   tick('2026-11-17T10:01:00.000Z',2650,'buy'),

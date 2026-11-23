@@ -237,9 +237,12 @@ try {
   await page.waitForTimeout(800);
   const rowsCoarse = await ladderRows();
   assert.ok(rowsCoarse < rowsFine, 'five steps per row must draw fewer ladder rows: ' + rowsCoarse + ' vs ' + rowsFine);
-  const offGrid = await page.evaluate(() => [...document.querySelectorAll('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times) .price-level')]
-    .map(node => Number(node.textContent.replace(/[\s\u00a0]/g, '').replace(',', '.')))
-    .filter(price => Math.abs(price * 2 - Math.round(price * 2)) > 1e-6));
+  const ladderPrices = await page.evaluate(() => [...document.querySelectorAll('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times) .price-level')]
+    .map(node => Number(node.textContent.replace(/[\s\u00a0]/g, '').replace(',', '.'))));
+  // Every label must parse: an empty or garbled label is a failure, not a row to skip.
+  assert.equal(ladderPrices.length, rowsCoarse, 'every ladder row must carry a price label');
+  assert.ok(ladderPrices.length > 0 && ladderPrices.every(Number.isFinite), 'every ladder price must be a number, got ' + ladderPrices.join(', '));
+  const offGrid = ladderPrices.filter(price => Math.abs(price * 2 - Math.round(price * 2)) > 1e-6);
   assert.deepEqual(offGrid, [], 'grouped ladder rows must sit on the 0.5 grid, found ' + offGrid.join(', '));
   await page.unroute('**/v1/market/analysis**');
   assert.equal((await (await fetch(base + '/v1/settings')).json()).footprint.ticksPerRow, 5, 'the row size must be saved');
