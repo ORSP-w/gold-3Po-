@@ -227,6 +227,19 @@ try {
   const savedFootprint = await (await fetch(base + '/v1/settings')).json();
   assert.equal(savedFootprint.footprint.imbalanceLevels, 10, 'the stack-length setting must be saved');
   assert.equal(savedFootprint.footprint.minLevelVolume, 30, 'the min-level setting must be saved');
+  // Row size: grouping five source steps per row must shrink the ladder, be saved, and come back at 1.
+  const ladderRows = () => page.evaluate(() => document.querySelectorAll('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times)').length);
+  const rowsFine = await ladderRows();
+  await page.locator('#setTicksPerRow').evaluate(el => { el.value = '5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
+  await page.waitForTimeout(2500);
+  const rowsCoarse = await ladderRows();
+  assert.ok(rowsCoarse < rowsFine, 'five steps per row must draw fewer ladder rows: ' + rowsCoarse + ' vs ' + rowsFine);
+  assert.equal((await (await fetch(base + '/v1/settings')).json()).footprint.ticksPerRow, 5, 'the row size must be saved');
+  await page.locator('#setTicksPerRow').evaluate(el => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
+  await page.waitForTimeout(2500);
+  assert.equal(await ladderRows(), rowsFine, 'returning to one step per row restores the source precision');
   // The value-area share: at the default 70% the dominant row alone covers it (a one-row area);
   // at 95% the area must widen past the point of control. The forming bar is recomputed locally
   // by the live-tick path, so this checks exactly the code that used to ignore the setting.

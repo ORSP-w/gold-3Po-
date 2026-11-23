@@ -15,7 +15,8 @@ export const DEFAULT_FOOTPRINT_OPTIONS = Object.freeze({
   imbalanceLevels: 3,     // consecutive imbalanced levels that make a stack
   minLevelVolume: 3,      // a row thinner than this is noise, never an imbalance
   valueAreaShare: 0.7,    // share of the bar's volume the value area must cover
-  absorptionMultiple: 2   // an edge row carrying this many median rows was absorbed
+  absorptionMultiple: 2,  // an edge row carrying this many median rows was absorbed
+  ticksPerRow: 1          // price steps grouped into one footprint row (1 = the source precision)
 });
 
 export function validateFootprintOptions(input = {}) {
@@ -35,7 +36,21 @@ export function validateFootprintOptions(input = {}) {
   };
   int('imbalanceLevels', 2, 10);
   int('minLevelVolume', 1, 100);
+  int('ticksPerRow', 1, 50);
   return o;
+}
+
+// Row grouping: the source keeps its own precision (one price step per tick row); the user chooses how
+// many of those steps one footprint row shows. Volumes are summed, never re-estimated.
+function groupRows(rows, rowStep) {
+  const grouped = new Map();
+  for (const row of rows) {
+    const price = Number((Math.round(row.price / rowStep) * rowStep).toFixed(8));
+    const target = grouped.get(price) || { price, bid: 0, ask: 0, unknown: 0 };
+    target.bid += row.bid; target.ask += row.ask; target.unknown += row.unknown;
+    grouped.set(price, target);
+  }
+  return [...grouped.values()].sort((a, b) => b.price - a.price);
 }
 
 export function tickSide(event = {}) {
@@ -130,7 +145,10 @@ function median(values) {
 
 export function footprintOf(input, options = {}) {
   const o = validateFootprintOptions(options);
-  const rows = sortedRows(input);
+  const sourceRows = sortedRows(input);
+  const sourceStep = positive(options.priceStep) ? options.priceStep : smallestGap(sourceRows);
+  const rowStep = o.ticksPerRow > 1 && sourceStep > 0 ? sourceStep * o.ticksPerRow : sourceStep;
+  const rows = o.ticksPerRow > 1 && sourceStep > 0 ? groupRows(sourceRows, rowStep) : sourceRows;
   const total = rows.reduce((sum, row) => sum + volumeOf(row), 0);
   const bid = rows.reduce((sum, row) => sum + row.bid, 0);
   const ask = rows.reduce((sum, row) => sum + row.ask, 0);
@@ -157,7 +175,7 @@ export function footprintOf(input, options = {}) {
   // Diagonal imbalance: buy volume here against sell volume one price step lower, and the mirror.
   // Neighbours are compared only when they really are one step apart: rows with an untraded price
   // between them are not adjacent levels, even though they sit next to each other in the array.
-  const step = positive(options.priceStep) ? options.priceStep : smallestGap(levels);
+  const step = rowStep;
   const adjacent = (a, b) => !!a && !!b && step > 0 && Math.abs(Math.abs(a.price - b.price) - step) < step * 1e-6;
   const imbalances = [];
   for (let i = 0; i < levels.length; i++) {

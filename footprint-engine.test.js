@@ -128,6 +128,25 @@ test('footprint options are validated', () => {
   assert.throws(() => validateFootprintOptions({ valueAreaShare: 1.5 }), /valueAreaShare/);
   assert.throws(() => validateFootprintOptions({ imbalanceLevels: 1 }), /imbalanceLevels/);
   assert.throws(() => validateFootprintOptions({ minLevelVolume: 0 }), /minLevelVolume/);
+  assert.throws(() => validateFootprintOptions({ ticksPerRow: 0 }), /ticksPerRow/);
+  assert.throws(() => validateFootprintOptions({ ticksPerRow: 1.5 }), /ticksPerRow/);
+});
+
+test('ticks per row groups source price steps into wider rows without losing volume', () => {
+  const source = [];
+  for (let i = 0; i <= 20; i++) source.push({ price: Number((2648 + i * 0.1).toFixed(1)), bid: 2, ask: 3, unknown: 1 });
+  const fine = footprintOf(source, { priceStep: 0.1, h: 2650, l: 2648, c: 2649 });
+  const coarse = footprintOf(source, { priceStep: 0.1, ticksPerRow: 5, h: 2650, l: 2648, c: 2649 });
+  assert.equal(fine.levels.length, 21, 'one row per source step by default');
+  assert.deepEqual(coarse.levels.map(row => row.price), [2650, 2649.5, 2649, 2648.5, 2648], 'rows sit on the 0.5 grid');
+  assert.equal(coarse.total, fine.total, 'grouping sums volume, it never re-estimates it');
+  assert.equal(coarse.levels.reduce((sum, row) => sum + row.bid, 0), fine.bid);
+  // Imbalance neighbours follow the row grid: 0.5 apart rows are adjacent once grouped.
+  const ladder = rows([[2650, 0, 0], [2649.9, 0, 12], [2649.5, 1, 1], [2649.4, 2, 1]]).filter(row => row.bid || row.ask);
+  const grouped = footprintOf(ladder, { priceStep: 0.1, ticksPerRow: 5, h: 2650, l: 2649.4, c: 2649.5 });
+  assert.ok(grouped.imbalances.some(item => item.side === 'buy' && item.price === 2650), 'the 2650 row is compared with the 2649.5 row one grouped step below');
+  // Grouping already-grouped rows is stable, so the live path can feed the result back in.
+  assert.deepEqual(footprintOf(coarse.levels, { priceStep: 0.1, ticksPerRow: 5, h: 2650, l: 2648, c: 2649 }).levels, coarse.levels);
 });
 
 test('a session profile has its own point of control and reports naked ones', () => {

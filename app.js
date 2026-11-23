@@ -130,9 +130,11 @@ function renderFootprint(){
  // hiding behind a horizontal scrollbar.
  const available=Math.max(320,(grid.clientWidth||900)-24),maxCols=Math.max(6,Math.min(60,Math.floor((available-68-92)/34)));
  const windowSize=maxCols,start=Math.max(0,Math.min(Math.max(0,bars.length-windowSize),selected-Math.floor(windowSize/2))),visible=bars.slice(start,start+windowSize),offset=start;
- // Only prices that actually traded are drawn: a row of zeros is not information.
+ // Only prices that actually traded are drawn: a row of zeros is not information. Rows come from the
+ // computed footprint, so a ticks-per-row grouping changes the ladder the same way it changes the marks.
+ const feet=visible.map(barFootprint);
  const traded=new Map();
- for(const b of visible)for(const row of (Array.isArray(b.levels)?b.levels:[])){
+ for(const b of feet)for(const row of (Array.isArray(b.levels)?b.levels:[])){
   if(!(row.bid||row.ask||row.unknown))continue;
   const key=Number(row.price).toFixed(2);
   if(!traded.has(key))traded.set(key,{price:Number(row.price),total:0,volume:(b.volume||0)});
@@ -140,7 +142,6 @@ function renderFootprint(){
  }
  const priceRows=[...traded.values()].sort((a,b)=>b.price-a.price).map(item=>item.price);
  if(!priceRows.length){grid.innerHTML='<div class="detail-caption">В выбранном окне нет сделок: футпринт появится с первыми тиками.</div>';return;}
- const feet=visible.map(barFootprint);
  // One scale for the whole panel: a colour means the same thing in every column.
  const scale=Math.max(1,...feet.map(b=>Number(b.maxLevelVolume)||0));
  const profile=sessionProfile(bars,{priceStep:0.1,options:footprintOptions()});
