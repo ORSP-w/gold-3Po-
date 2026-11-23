@@ -108,17 +108,30 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     analogueCache.set(key, entry);
   }
   // Broker symbol specifications (tick size) reported by the MT5 connector with each tick batch.
+  // Only gold symbols are stored and the map is capped, so the ingest token cannot grow it without
+  // bound. A batch without a spec clears the stored one, so after a reconnect to a broker that does
+  // not report a tick size (or an older connector) rows fall back to the default instead of keeping
+  // the previous broker's grid.
   const symbolSpecs = new Map();
+  const SYMBOL_SPECS_MAX = 16;
   function rememberSpec(source, symbol, spec) {
+    if (typeof symbol !== 'string') return;
+    const name = symbol.trim().toUpperCase();
+    if (!isGoldSymbol(source, name)) return;
+    const key = source + ':' + name;
     const tickSize = Number(spec?.tickSize);
-    if (typeof symbol !== 'string' || !Number.isFinite(tickSize) || tickSize <= 0 || tickSize > 100) return;
-    symbolSpecs.set(source + ':' + symbol.trim().toUpperCase(), { tickSize, ...(Number.isInteger(spec.digits) ? { digits: spec.digits } : {}) });
+    if (spec === undefined || spec === null) { symbolSpecs.delete(key); return; }
+    if (!Number.isFinite(tickSize) || tickSize <= 0 || tickSize > 100) return;
+    if (!symbolSpecs.has(key) && symbolSpecs.size >= SYMBOL_SPECS_MAX) symbolSpecs.delete(symbolSpecs.keys().next().value);
+    symbolSpecs.set(key, { tickSize });
   }
   // The footprint's source precision: the broker's tick size when MT5 reported it, otherwise the
-  // caller's priceStep, otherwise 0.1. The user's row grouping is applied on top of this, never instead.
-  function priceStepFor(source, symbol, requested) {
-    const spec = symbolSpecs.get(source + ':' + symbol);
-    if (spec) return spec.tickSize;
+  // analysis step. The user's row grouping is applied on top of this, never instead.
+  function footprintStepFor(source, symbol, analysisStep) {
+    return symbolSpecs.get(source + ':' + symbol)?.tickSize ?? analysisStep;
+  }
+  // The analysis grid for zones and bar heuristics: the caller's priceStep, otherwise 0.1.
+  function analysisStep(requested) {
     const asked = Number(requested);
     return Number.isFinite(asked) && asked > 0 ? Math.min(100, Math.max(0.001, asked)) : 0.1;
   }
@@ -161,7 +174,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const intervalMs = rawInterval === null ? current.zones.timeframeMinutes * 60000 : Number(rawInterval);
       if (!Number.isInteger(intervalMs) || intervalMs < 60000 || intervalMs > 86400000) return json(res,400,{error:'invalid_interval',message:'intervalMs must be an integer between 60000 and 86400000.'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 10000, zoneOptions: current.zones, footprintOptions: current.footprint });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, footprintStep: footprintStepFor(source, symbol, 0.1), limit: 10000, zoneOptions: current.zones, footprintOptions: current.footprint });
       const zones = analysis.zones.map(zone => ({
         id: zone.id, side: zone.side, low: zone.low, high: zone.high,
         strength: zone.strength, label: zone.label, distance: zone.distance, state: zone.state
@@ -216,10 +229,11 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
+      const priceStep = analysisStep(url.searchParams.get('priceStep'));
+      const footprintStep = footprintStepFor(source, symbol, priceStep);
       const activeAnalysis = await setups.activeDefinition();
       const current = await settings.get();
-      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep, zoneOptions: current.zones, footprintOptions: current.footprint }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
+      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep, footprintStep, zoneOptions: current.zones, footprintOptions: current.footprint }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/replay') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
@@ -231,9 +245,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
-      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
+      const priceStep = analysisStep(url.searchParams.get('priceStep'));
+      const footprintStep = footprintStepFor(source, symbol, priceStep);
       const replaySettings = await settings.get();
-      return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, zoneOptions: replaySettings.zones, footprintOptions: replaySettings.footprint }) });
+      return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, footprintStep, limit: 20000, zoneOptions: replaySettings.zones, footprintOptions: replaySettings.footprint }) });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/backtest') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
@@ -243,9 +258,10 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
-      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
+      const priceStep = analysisStep(url.searchParams.get('priceStep'));
+      const footprintStep = footprintStepFor(source, symbol, priceStep);
       const backtestSettings = await settings.get();
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, zoneOptions: backtestSettings.zones, footprintOptions: backtestSettings.footprint });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, footprintStep, limit: 20000, zoneOptions: backtestSettings.zones, footprintOptions: backtestSettings.footprint });
       const options = {
         initialEquity: Number(url.searchParams.get('initialEquity') || 10000),
         riskPct: Number(url.searchParams.get('riskPct') || active.backtest.riskPct),
@@ -272,7 +288,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
       const signalSettings = await settings.get();
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 20000, zoneOptions: signalSettings.zones, footprintOptions: signalSettings.footprint });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, footprintStep: footprintStepFor(source, symbol, 0.1), limit: 20000, zoneOptions: signalSettings.zones, footprintOptions: signalSettings.footprint });
       const signals = generateSignals(analysis.bars, active.strategy);
       const simulation = runBacktest(analysis.bars, { ...active.backtest, minScore: active.strategy.minScore, atrPeriod: active.strategy.atrPeriod, strategyConditions: active.strategy });
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
@@ -307,7 +323,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const cacheKey = source + ':' + symbol + ':' + intervalMs + ':' + settingsRevision;
       let cached = analogueCache.get(cacheKey);
       if (!cached || cached.watermark !== ingestWatermark) {
-        const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
+        const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, footprintStep: footprintStepFor(source, symbol, 0.1), limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
         const signals = generateSignals(analysis.bars, active.strategy);
         cached = { watermark: ingestWatermark, reference: signals.at(-1) || null, bars: analysis.bars };
         cachePut(cacheKey, cached);

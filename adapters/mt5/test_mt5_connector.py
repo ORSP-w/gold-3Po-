@@ -88,7 +88,8 @@ class ConnectorTests(unittest.TestCase):
 
     def test_connect_investor_account_and_exact_suffix(self):
         self.assertEqual(self.connect(), {"id": "request-1", "ok": True, "symbol": "XAUUSDm",
-                                         "commonDataPath": "common data", "dataPath": "terminal data"})
+                                         "commonDataPath": "common data", "dataPath": "terminal data",
+                                         "specUnavailable": "symbol_info_failed"})
         self.assertEqual(self.api.calls, [
             ("initialize", (os.path.join(self.api.install, "terminal64.exe"),), connector.MT5_TIMEOUT_MS),
             ("login", 1234, SECRET, "Broker-Demo", connector.MT5_TIMEOUT_MS),
@@ -173,18 +174,28 @@ class ConnectorTests(unittest.TestCase):
                          ["invalid_json", "command_too_large", "not_connected", "unknown_operation"])
 
     def test_symbol_spec_reports_the_broker_tick_size(self):
+        api = lambda value: SimpleNamespace(symbol_info=lambda s: value)
         info = SimpleNamespace(trade_tick_size=0.01, point=0.01, digits=2)
-        self.assertEqual(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: info), "XAUUSDm"),
-                         {"tickSize": 0.01, "digits": 2})
+        self.assertEqual(connector.symbol_spec(api(info), "XAUUSDm"), ({"tickSize": 0.01}, None))
         # A zero tick size falls back to the point; nothing usable means no spec, never an invented one.
         point_only = SimpleNamespace(trade_tick_size=0.0, point=0.05, digits=2)
-        self.assertEqual(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: point_only), "GOLD")["tickSize"], 0.05)
-        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: None), "GOLD"))
+        self.assertEqual(connector.symbol_spec(api(point_only), "GOLD"), ({"tickSize": 0.05}, None))
+        self.assertEqual(connector.symbol_spec(api(None), "GOLD"), (None, "symbol_info_empty"))
         empty = SimpleNamespace(trade_tick_size=0.0, point=0.0, digits=2)
-        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: empty), "GOLD"))
+        self.assertEqual(connector.symbol_spec(api(empty), "GOLD"), (None, "tick_size_unusable"))
+        # A failing MT5 call is reported as such, without the library's own text.
         def broken(_):
             raise RuntimeError(SECRET)
-        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=broken), "GOLD"))
+        spec, missing = connector.symbol_spec(SimpleNamespace(symbol_info=broken), "GOLD")
+        self.assertEqual((spec, missing), (None, "symbol_info_failed"))
+
+    def test_connect_reports_the_tick_size_or_why_it_is_missing(self):
+        self.api.symbol_info = lambda symbol: SimpleNamespace(trade_tick_size=0.01, point=0.01, digits=2)
+        result = self.connect()
+        self.assertEqual(result["spec"], {"tickSize": 0.01})
+        self.assertNotIn("specUnavailable", result)
+        self.api.symbol_info = lambda symbol: None
+        self.assertEqual(self.connect()["specUnavailable"], "symbol_info_empty")
 
     def test_unexpected_library_exception_does_not_disclose_its_text(self):
         self.connect()

@@ -37,7 +37,25 @@ test('timeframe aggregation separates bars and orders ticks chronologically',()=
   assert.equal(out.bars[0].o,2649);
   assert.equal(out.bars[1].c,2651);
 });
-test('analysis validates its inputs',()=>assert.throws(()=>buildMarketAnalysis([], {priceStep:0}),/Invalid analysis input/));
+test('analysis validates its inputs',()=>{
+ assert.throws(()=>buildMarketAnalysis([], {priceStep:0}),/Invalid analysis input/);
+ assert.throws(()=>buildMarketAnalysis([], {footprintStep:0}),/Invalid analysis input/);
+});
+
+test('a finer footprint grid changes footprint rows only, not exhaustion or zones',()=>{
+ // A one-sided bar 0.4 wide: within 5 x 0.1 it is exhaustion; that must not depend on the broker tick.
+ const events=[];let seq=1;
+ for(let i=0;i<5;i++)events.push({source:'mt5',symbol:'XAUUSD',timestamp:new Date(Date.UTC(2026,0,5,10,1,i)).toISOString(),sequence:seq++,bid:2648+i*0.1-0.05,ask:2648+i*0.1+0.05,last:+(2648+i*0.1).toFixed(2),tickVolume:3,realVolume:0,flags:32,aggressorSide:'buy'});
+ const coarse=buildMarketAnalysis(events);
+ const fine=buildMarketAnalysis(events,{footprintStep:0.01});
+ assert.equal(coarse.bars[0].exhaustion,true,'the fixture is an exhaustion bar on the 0.1 analysis grid');
+ assert.equal(fine.bars[0].exhaustion,true,'a 0.01 broker tick must not switch exhaustion off');
+ assert.deepEqual(fine.zones,coarse.zones,'zone geometry follows the analysis grid');
+ // The rows really move to the finer grid: an off-0.1 trade keeps its own row instead of rounding.
+ const offGrid=[...events,{...events[4],sequence:seq++,timestamp:new Date(Date.UTC(2026,0,5,10,1,6)).toISOString(),last:2648.43,bid:2648.38,ask:2648.48}];
+ assert.ok(buildMarketAnalysis(offGrid,{footprintStep:0.01}).bars[0].levels.some(row=>Math.abs(row.price-2648.43)<1e-6),'the 0.01 footprint grid keeps 2648.43 as its own row');
+ assert.ok(!buildMarketAnalysis(offGrid).bars[0].levels.some(row=>Math.abs(row.price-2648.43)<1e-6),'the default grid rounds it to 0.1');
+});
 
 test('the session profile follows the footprint options, including the row size',()=>{
  const events=[];let seq=1;

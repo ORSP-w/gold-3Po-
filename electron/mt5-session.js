@@ -178,9 +178,11 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.commonDataPath = result.commonDataPath;
       owner.dataPath = result.dataPath;
       // The broker's tick size, when MT5 reported a usable one: the server builds footprint rows on it.
+      // Without it the status says why, so a failing MT5 call is visible instead of silent 0.1 rows.
       const tickSize = Number(result.spec?.tickSize);
-      if (Number.isFinite(tickSize) && tickSize > 0 && tickSize <= 100) owner.spec = { tickSize, ...(Number.isInteger(result.spec.digits) ? { digits: result.spec.digits } : {}) };
-      status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0 };
+      if (Number.isFinite(tickSize) && tickSize > 0 && tickSize <= 100) owner.spec = { tickSize };
+      const specNote = owner.spec ? {} : { tickSize: null, tickSizeIssue: typeof result.specUnavailable === 'string' ? result.specUnavailable.slice(0, 40) : 'not_reported' };
+      status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0, ...(owner.spec ? { tickSize: owner.spec.tickSize } : specNote) };
       void seed(owner);
       return state();
     } catch (error) {

@@ -123,24 +123,31 @@ test('session connects, ingests, publishes zones and clears them on disconnect',
 });
 
 test('the broker tick size from MT5 travels with every tick batch', async () => {
-  for (const [spec, expected] of [[{ tickSize: 0.01, digits: 2 }, { tickSize: 0.01, digits: 2 }], [undefined, undefined], [{ tickSize: 0 }, undefined]]) {
+  const cases = [
+    [{ spec: { tickSize: 0.01, digits: 2 } }, { tickSize: 0.01 }, { tickSize: 0.01 }],
+    [{ specUnavailable: 'symbol_info_failed' }, undefined, { tickSize: null, tickSizeIssue: 'symbol_info_failed' }],
+    [{}, undefined, { tickSize: null, tickSizeIssue: 'not_reported' }],
+    [{ spec: { tickSize: 0 } }, undefined, { tickSize: null, tickSizeIssue: 'not_reported' }]
+  ];
+  for (const [reported, expected, status] of cases) {
     const api = fakeApi();
     const session = createMt5Session({
       workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
       makeWorker: fakeWorker({
-        connect: { ok: true, symbol: 'XAUUSDm', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data', ...(spec ? { spec } : {}) },
+        connect: { ok: true, symbol: 'XAUUSDm', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data', ...reported },
         history: { ok: true, ticks: [tick] },
         poll: { ok: true, ticks: [tick] }
       }),
       request: api.request,
       publish: async () => {}
     });
-    await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+    const online = await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+    for (const [key, value] of Object.entries(status)) assert.equal(online[key], value, key + ' in the status for ' + JSON.stringify(reported));
     await new Promise(resolve => setTimeout(resolve, 300));
     await session.disconnect();
     const batches = api.calls.filter(call => call.path.startsWith('/v1/ingest/mt5/'));
     assert.ok(batches.length >= 1, 'ticks must be sent');
-    for (const batch of batches) assert.deepEqual(batch.body.spec, expected, 'spec sent with ' + JSON.stringify(spec));
+    for (const batch of batches) assert.deepEqual(batch.body.spec, expected, 'spec sent with ' + JSON.stringify(reported));
   }
 });
 
