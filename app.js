@@ -2,12 +2,12 @@ import { barDelta, totalVolume } from './market-data.js';
 import { footprintOf, footprintCell, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
 import { candlePart } from './footprint-candle.js';
-import { chartScale } from './chart-scale.js';
+import { chartScale, CHART_AXIS, priceViewport, zoomPriceViewport, panPriceViewport } from './chart-scale.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
 let bars=[], zones=[], selected=-1, selectedZone=null, showZones=true, showNumbers=true, mode='bidask', live=false, replayMode=false, toastTimer;
 let levels=[], analysisMeta=null, hasAutoScrolled=false;
-let horizontalZoom=1, verticalZoom=1, chartDrag=null, suppressChartClickUntil=0;
+let horizontalZoom=1, verticalZoom=1, verticalOffset=0, chartDrag=null, suppressChartClickUntil=0;
 const chartViewport=chart.parentElement;
 // The user's footprint options (published by settings-client at module init and on every save).
 // The live path recomputes the forming bar with them, so a changed setting shows at once.
@@ -41,7 +41,14 @@ function changeHorizontalZoom(next,anchorClientX=null){
  chartViewport.scrollLeft=Math.max(0,contentX*newWidth/oldWidth-localX);
  updateChartZoomControls();
 }
-function changeVerticalZoom(next){verticalZoom=clamp(next,0.25,8);renderChart();updateChartZoomControls();}
+function changeVerticalZoom(next,anchorClientY=null){
+ if(!bars.length){verticalZoom=clamp(next,0.25,8);renderChart();updateChartZoomControls();return;}
+ const low=Math.min(...bars.map(b=>b.l)),high=Math.max(...bars.map(b=>b.h));
+ const rect=chart.getBoundingClientRect(),svgY=anchorClientY===null?195:(anchorClientY-rect.top)*(390/Math.max(1,rect.height));
+ const anchorRatio=clamp((svgY-34)/315,0,1);
+ const nextView=zoomPriceViewport({low,high,zoom:verticalZoom,nextZoom:next,offset:verticalOffset,anchorRatio});
+ verticalZoom=nextView.zoom;verticalOffset=nextView.offset;renderChart();updateChartZoomControls();
+}
 function bindChartNavigation(){
  if(!chartViewport||chartViewport.dataset.navigationBound==='1')return;
  chartViewport.dataset.navigationBound='1';
@@ -49,23 +56,36 @@ function bindChartNavigation(){
   if(!bars.length)return;
   event.preventDefault();
   const factor=event.deltaY<0?1.12:1/1.12;
-  if(event.shiftKey)changeVerticalZoom(verticalZoom*factor);
+  if(event.shiftKey)changeVerticalZoom(verticalZoom*factor,event.clientY);
   else changeHorizontalZoom(horizontalZoom*factor,event.clientX);
  },{passive:false});
  chartViewport.addEventListener('pointerdown',event=>{
   if(event.button!==0)return;
-  chartDrag={startX:event.clientX,startScrollLeft:chartViewport.scrollLeft,moved:false};
-  chartViewport.classList.add('chart-panning');
+  const rect=chart.getBoundingClientRect(),viewWidth=chart.viewBox?.baseVal?.width||rect.width;
+  const svgX=(event.clientX-rect.left)*(viewWidth/Math.max(1,rect.width));
+  const priceAxis=svgX>=viewWidth-CHART_AXIS.right;
+  chartDrag={mode:priceAxis?'price':'time',startX:event.clientX,startY:event.clientY,startScrollLeft:chartViewport.scrollLeft,startOffset:verticalOffset,moved:false};
+  chartViewport.classList.add(priceAxis?'chart-price-panning':'chart-panning');
  });
  window.addEventListener('pointermove',event=>{
   if(!chartDrag)return;
+  if(chartDrag.mode==='price'){
+   const delta=event.clientY-chartDrag.startY;
+   if(Math.abs(delta)>3)chartDrag.moved=true;
+   if(chartDrag.moved&&bars.length){
+    const low=Math.min(...bars.map(b=>b.l)),high=Math.max(...bars.map(b=>b.h));
+    verticalOffset=panPriceViewport({low,high,zoom:verticalZoom,offset:chartDrag.startOffset,deltaPixels:delta,plotHeight:315});
+    renderChart();chartViewport.classList.add('is-dragging');
+   }
+   return;
+  }
   const delta=event.clientX-chartDrag.startX;
   if(Math.abs(delta)>3)chartDrag.moved=true;
   if(chartDrag.moved){chartViewport.scrollLeft=chartDrag.startScrollLeft-delta;chartViewport.classList.add('is-dragging');}
  });
  const endDrag=()=>{
   if(chartDrag?.moved)suppressChartClickUntil=performance.now()+250;
-  chartDrag=null;chartViewport.classList.remove('chart-panning','is-dragging');
+  chartDrag=null;chartViewport.classList.remove('chart-panning','chart-price-panning','is-dragging');
  };
  window.addEventListener('pointerup',endDrag);
  window.addEventListener('pointercancel',endDrag);
@@ -76,7 +96,7 @@ $('#chartZoomIn')?.addEventListener('click',()=>changeHorizontalZoom(horizontalZ
 $('#chartZoomReset')?.addEventListener('click',()=>{horizontalZoom=1;renderChart();chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();});
 $('#chartPriceZoomOut')?.addEventListener('click',()=>changeVerticalZoom(verticalZoom/1.2));
 $('#chartPriceZoomIn')?.addEventListener('click',()=>changeVerticalZoom(verticalZoom*1.2));
-$('#chartPriceZoomReset')?.addEventListener('click',()=>changeVerticalZoom(1));
+$('#chartPriceZoomReset')?.addEventListener('click',()=>{verticalZoom=1;verticalOffset=0;renderChart();updateChartZoomControls();});
 window.addEventListener('resize',()=>renderChart());
 function renderChart(){
  if(!bars.length){chart.innerHTML='';chart.setAttribute('viewBox','0 0 1000 390');chart.style.width='100%';setEmptyState(true);return;}
@@ -88,8 +108,8 @@ function renderChart(){
  const scale=chartScale({panelWidth:wrapWidth,bars:bars.length,left,zoom:horizontalZoom});
  const width=scale.width, step=scale.step, svgWidth=scale.svgWidth;
  const allPrices=bars.flatMap(b=>[b.h,b.l]); if(!allPrices.length){setEmptyState(true);return;}
- const rawMin=Math.min(...allPrices),rawMax=Math.max(...allPrices),rawRange=Math.max(0.01,rawMax-rawMin+2),center=(rawMin+rawMax)/2;
- const visibleRange=rawRange/verticalZoom,min=center-visibleRange/2,max=center+visibleRange/2;
+ const rawMin=Math.min(...allPrices),rawMax=Math.max(...allPrices);
+ const priceView=priceViewport({low:rawMin,high:rawMax,zoom:verticalZoom,offset:verticalOffset}),min=priceView.min,max=priceView.max;
  const x=i=>left+step*(i+.5),y=p=>34+(max-p)/(max-min)*315,cw=Math.max(1,Math.min(26,step*.62));
  const rawStep=(max-min)/8,mag=10**Math.floor(Math.log10(rawStep)),gridStep=[1,2,2.5,5,10].map(m=>m*mag).find(v=>v>=rawStep);
  let html=''; for(let p=Math.ceil(min/gridStep)*gridStep;p<=max;p+=gridStep)html+=`<line x1="${left}" y1="${y(p)}" x2="${left+width}" y2="${y(p)}" class="grid-line"/><text x="${left+width+12}" y="${y(p)+4}" class="axis-label">${fmt(p,gridStep<1?2:gridStep<10?1:0)}</text>`;
@@ -243,7 +263,7 @@ function select(i){
 $('#zonesToggle').addEventListener('click',e=>{showZones=!showZones;e.currentTarget.setAttribute('aria-pressed',String(showZones));e.currentTarget.classList.toggle('is-off',!showZones);renderChart();notify(showZones?'Зоны ликвидности показаны':'Зоны ликвидности скрыты');});
 $('#numbersToggle').addEventListener('click',e=>{showNumbers=!showNumbers;e.currentTarget.setAttribute('aria-pressed',String(showNumbers));renderFootprint();});
 $('#footprintModes').querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{mode=b.dataset.mode;$('#footprintModes').querySelectorAll('button').forEach(x=>x.classList.toggle('selected',x===b));renderFootprint();}));
-$('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';horizontalZoom=1;verticalZoom=1;selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();notify('Вид сброшен');});
+$('#resetView').addEventListener('click',()=>{replayMode=false;showZones=true;showNumbers=true;mode='bidask';horizontalZoom=1;verticalZoom=1;verticalOffset=0;selectedZone=null;$('#zonesToggle').setAttribute('aria-pressed','true');$('#numbersToggle').setAttribute('aria-pressed','true');$('#zonesToggle').classList.remove('is-off');renderZones();$('#footprintModes').querySelectorAll('button').forEach(b=>b.classList.toggle('selected',b.dataset.mode==='bidask'));select(bars.length-1);chartViewport.scrollLeft=chartViewport.scrollWidth;updateChartZoomControls();notify('Вид сброшен');});
 $('#layoutButton').addEventListener('click',()=>{$('#workspace').classList.toggle('focus-chart');renderChart();notify($('#workspace').classList.contains('focus-chart')?'Режим графика включён':'Рабочая область восстановлена');});
 // A streamed tick updates the forming bar in place: the last footprint column and the last
 // candle move between authoritative refetches instead of waiting for the next 1.5 s poll.
