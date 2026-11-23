@@ -230,11 +230,18 @@ try {
   // Row size: grouping five source steps per row must shrink the ladder, be saved, and come back at 1.
   const ladderRows = () => page.evaluate(() => document.querySelectorAll('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times)').length);
   const rowsFine = await ladderRows();
+  // Hold back the analysis refetch so only the browser's own footprint path can regroup the rows.
+  await page.route('**/v1/market/analysis**', route => route.abort());
   await page.locator('#setTicksPerRow').evaluate(el => { el.value = '5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(800);
   const rowsCoarse = await ladderRows();
   assert.ok(rowsCoarse < rowsFine, 'five steps per row must draw fewer ladder rows: ' + rowsCoarse + ' vs ' + rowsFine);
+  const offGrid = await page.evaluate(() => [...document.querySelectorAll('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times) .price-level')]
+    .map(node => Number(node.textContent.replace(/[\s\u00a0]/g, '').replace(',', '.')))
+    .filter(price => Math.abs(price * 2 - Math.round(price * 2)) > 1e-6));
+  assert.deepEqual(offGrid, [], 'grouped ladder rows must sit on the 0.5 grid, found ' + offGrid.join(', '));
+  await page.unroute('**/v1/market/analysis**');
   assert.equal((await (await fetch(base + '/v1/settings')).json()).footprint.ticksPerRow, 5, 'the row size must be saved');
   await page.locator('#setTicksPerRow').evaluate(el => { el.value = '1'; el.dispatchEvent(new Event('input', { bubbles: true })); });
   await page.waitForFunction(() => document.querySelector('#settingsStatus')?.textContent === 'Сохранено', null, { timeout: 5000 });

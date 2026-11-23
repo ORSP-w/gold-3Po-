@@ -145,8 +145,25 @@ test('ticks per row groups source price steps into wider rows without losing vol
   const ladder = rows([[2650, 0, 0], [2649.9, 0, 12], [2649.5, 1, 1], [2649.4, 2, 1]]).filter(row => row.bid || row.ask);
   const grouped = footprintOf(ladder, { priceStep: 0.1, ticksPerRow: 5, h: 2650, l: 2649.4, c: 2649.5 });
   assert.ok(grouped.imbalances.some(item => item.side === 'buy' && item.price === 2650), 'the 2650 row is compared with the 2649.5 row one grouped step below');
-  // Grouping already-grouped rows is stable, so the live path can feed the result back in.
-  assert.deepEqual(footprintOf(coarse.levels, { priceStep: 0.1, ticksPerRow: 5, h: 2650, l: 2648, c: 2649 }).levels, coarse.levels);
+});
+
+test('a bar built tick by tick shows the same grouped ladder as the whole bar', () => {
+  // The live view feeds the forming bar's raw level map to footprintOf after every tick; the server
+  // groups the finished bar's raw rows once. Both must land on the same rows and volumes.
+  const options = { priceStep: 0.1, ticksPerRow: 5 };
+  const ticks = [[2648.3, 'sell'], [2648.4, 'buy'], [2648.7, 'buy'], [2649.1, 'sell'], [2648.2, 'buy'], [2649.4, 'buy'], [2648.8, 'sell']];
+  const forming = emptyBar(0, ticks[0][0]);
+  let live = null;
+  for (const [last, direction] of ticks) {
+    applyTickToBar(forming, { last, volume: 2, direction }, 0.1);
+    live = footprintOf(forming.levels, { ...options, h: forming.h, l: forming.l, c: forming.c });
+  }
+  const whole = emptyBar(0, ticks[0][0]);
+  for (const [last, direction] of ticks) applyTickToBar(whole, { last, volume: 2, direction }, 0.1);
+  const server = footprintOf([...whole.levels.values()], { ...options, h: whole.h, l: whole.l, c: whole.c });
+  assert.deepEqual(live.levels, server.levels);
+  assert.deepEqual(live.levels.map(row => row.price), [2649.5, 2649, 2648.5, 2648], 'the forming bar sits on the grouped 0.5 grid');
+  assert.equal(live.poc, server.poc);
 });
 
 test('a session profile has its own point of control and reports naked ones', () => {
