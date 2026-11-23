@@ -457,7 +457,7 @@ try {
     const cells = [...document.querySelectorAll('#footprintGrid .foot-cell')];
     const forming = cells.filter(cell => cell.classList.contains('foot-forming'));
     const first = document.querySelector('#footprintGrid .foot-row:not(.foot-head):not(.foot-deltas):not(.foot-times) .foot-cell');
-    const state = window.gold3poBarsForTest?.() ?? null;
+    
     return {
       body: cells.filter(cell => cell.classList.contains('candle-body')).length,
       wick: cells.filter(cell => cell.classList.contains('candle-wick')).length,
@@ -465,13 +465,15 @@ try {
       up: cells.filter(cell => cell.classList.contains('candle-body') && cell.classList.contains('candle-up')).length,
       down: cells.filter(cell => cell.classList.contains('candle-body') && cell.classList.contains('candle-down')).length,
       formingBody: forming.filter(cell => cell.classList.contains('candle-body')).length,
-      firstOpacity: first ? getComputedStyle(first).backgroundColor : null
+
     };
   });
   // The fixtures are nearly flat bars, so the body/wick/blank split itself is unit tested in
   // footprint-candle.test.js; here it is enough that the drawn ladder carries the parts.
   assert.ok(candles.body > 0 && candles.out > 0, 'the ladder marks body rows and blank rows: ' + JSON.stringify(candles));
-  assert.ok(candles.up > 0, 'body edges follow the bar direction');
+  assert.ok(candles.up > 0, 'body edges follow the up-bar direction');
+  assert.ok(candles.down > 0, 'body edges follow the down-bar direction');
+  assert.ok(candles.wick > 0, 'traded rows outside candle bodies are rendered as wicks');
   assert.equal(candles.formingBody > 0, true, 'the forming column has a body too');
 
   assert.deepEqual(pageErrors, [], 'browser must not emit uncaught JavaScript errors');
