@@ -17,7 +17,7 @@ function render(status) {
     window.dispatchEvent(new CustomEvent('mt5-symbol-change'));
   }
   const tick = status.lastTick ? new Date(status.lastTick).toLocaleString() : '';
-  const note = connected ? `${status.message} Уровней: ${status.zoneCount ?? 0}.${tick ? ` Последний тик: ${tick}.` : ''}${tickSizeNote(status)}` : status.message;
+  const note = connected ? `${status.message} Зон передано в MT5: ${status.zoneCount ?? 0}. Для отображения на графике добавьте индикатор Gold3PoLevels.${tick ? ` Последний тик: ${tick}.` : ''}${tickSizeNote(status)}` : status.message;
   detail.textContent = indicatorNotice ? `${indicatorNotice} ${note}` : note;
   const pending = status.state === 'connecting' || status.state === 'reconnecting';
   const label = connected ? `MT5 · ${status.symbol}${status.feed === 'stale' ? ' · нет тиков' : ''}` : status.state === 'reconnecting' ? 'MT5 · переподключение…' : status.state === 'connecting' ? 'MT5 · подключение…' : 'Подключить MT5';
