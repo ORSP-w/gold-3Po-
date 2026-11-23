@@ -54,7 +54,7 @@ function startWorker(command, args) {
 }
 
 export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, makeWorker = startWorker, request = fetch, publish = publishSnapshot,
-  now = () => Date.now(), pollMs = 1800, maxFailures = 5, maxBackoffMs = 30_000, staleAfterMs = 120_000 }) {
+  now = () => Date.now(), pollMs = 1800, maxFailures = 5, maxBackoffMs = 30_000, staleAfterMs = 120_000, maxUnsent = 20_000 }) {
   let session = null;
   let status = { state: 'offline', message: 'MT5 не подключён.' };
   const fetchApi = (route, init = {}) => request(apiOrigin + route, { ...init, signal: AbortSignal.timeout(15_000) });
@@ -73,13 +73,26 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       unique.add(identity);
       records.push({ timestamp, bid, ask, last, tickVolume, realVolume, flags, eventId: `MT5-${identity}`, sequence: ++owner.sequence });
     }
+    // Live ticks the local service did not accept are kept and sent first next time: the connector has
+    // already moved past them, so dropping them would leave a hole. The service skips duplicates by
+    // event id, so a resend is safe. The queue is bounded; the oldest ticks go first if it fills.
+    if (!historical && owner.unsent?.length) {
+      records.unshift(...owner.unsent);
+      owner.unsent = [];
+    }
+    if (!historical && records.length > maxUnsent) {
+      owner.droppedTicks = (owner.droppedTicks || 0) + records.length - maxUnsent;
+      records.splice(0, records.length - maxUnsent);
+    }
     for (let i = 0; i < records.length && session === owner; i += 1000) {
       const route = historical ? 'history' : 'live-batch';
       const send = () => fetchApi(`/v1/ingest/mt5/${route}`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, spec: owner.spec ?? null, ticks: records.slice(i, i + 1000) })
       });
-      let response = await send();
+      let response;
+      try { response = await send(); }
+      catch (error) { if (!historical) owner.unsent = records.slice(i); throw error; }
       if (response.status === 409 && !historical) {
         const { lastAcceptedSequence } = await response.json();
         if (!Number.isSafeInteger(lastAcceptedSequence)) throw new Error('Не удалось синхронизировать поток котировок.');
@@ -87,7 +100,10 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
         for (let j = i; j < records.length; j++) records[j].sequence = ++owner.sequence;
         response = await send();
       }
-      if (!response.ok) throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
+      if (!response.ok) {
+        if (!historical) owner.unsent = records.slice(i);
+        throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
+      }
       await response.json();
     }
     return records.length;
@@ -140,7 +156,8 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const stale = owner.lastTickAt !== undefined && now() - owner.lastTickAt > staleAfterMs;
       const online = stale ? `Нет новых тиков более ${Math.round(staleAfterMs / 1000)} с: рынок закрыт или терминал не получает котировки.`
         : !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
-      set(owner, { state: 'online', feed: stale ? 'stale' : 'live', retries: 0, lastTick: owner.lastTick ?? null, message: owner.historyNote ? `${online} ${owner.historyNote}` : online });
+      const lost = owner.droppedTicks ? ` Потеряно тиков за время сбоя: ${owner.droppedTicks}.` : '';
+      set(owner, { state: 'online', feed: stale ? 'stale' : 'live', retries: 0, droppedTicks: owner.droppedTicks || 0, lastTick: owner.lastTick ?? null, message: (owner.historyNote ? `${online} ${owner.historyNote}` : online) + lost });
     } catch (error) {
       if (session !== owner) return;
       owner.failures = (owner.failures || 0) + 1;

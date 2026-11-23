@@ -397,3 +397,65 @@ test('the last retry says the next failure closes the connection', async () => {
   assert.match(state.message, /Повтор 4 из 4.*последний: при новой ошибке соединение будет закрыто/);
   await session.disconnect();
 });
+
+test('live ticks the service could not take are resent after it recovers', async () => {
+  let down = 2, n = 0;
+  const received = [];
+  const base = fakeApi();
+  const request = async (url, init) => {
+    if (new URL(url).pathname === '/v1/ingest/mt5/live-batch') {
+      if (down > 0) { down--; return { ok: false, status: 500, json: async () => ({}) }; }
+      for (const t of JSON.parse(init.body).ticks) received.push(t.timestamp);
+      return { ok: true, status: 202, json: async () => ({ accepted: 1 }) };
+    }
+    return base.request(url, init);
+  };
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 15, maxBackoffMs: 30, maxFailures: 5,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { n++; return n <= 4 ? { ok: true, ticks: [{ ...tick, timestamp: new Date(Date.UTC(2026, 0, 5, 10, 0, n)).toISOString() }] } : { ok: true, ticks: [] }; }
+    }),
+    request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 600));
+  const expected = [1, 2, 3, 4].map(s => new Date(Date.UTC(2026, 0, 5, 10, 0, s)).toISOString());
+  assert.deepEqual(received, expected, 'every polled tick reaches the service once, in order, after the outage');
+  assert.equal(session.state().state, 'online');
+  await session.disconnect();
+});
+
+test('the resend queue is bounded and says how many ticks it had to drop', async () => {
+  let down = 1, n = 0;
+  const received = [];
+  const base = fakeApi();
+  const request = async (url, init) => {
+    if (new URL(url).pathname === '/v1/ingest/mt5/live-batch') {
+      if (down > 0) { down--; throw new Error('connect ECONNREFUSED'); }
+      for (const t of JSON.parse(init.body).ticks) received.push(t.timestamp);
+      return { ok: true, status: 202, json: async () => ({ accepted: 1 }) };
+    }
+    return base.request(url, init);
+  };
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 15, maxBackoffMs: 30, maxUnsent: 3,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { n++; return n <= 2 ? { ok: true, ticks: [0, 1, 2].map(k => ({ ...tick, timestamp: new Date(Date.UTC(2026, 0, 5, 10, n, k)).toISOString() })) } : { ok: true, ticks: [] }; }
+    }),
+    request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.equal(received.length, 3, 'only the newest ticks up to the bound are kept');
+  assert.equal(received.at(-1), new Date(Date.UTC(2026, 0, 5, 10, 2, 2)).toISOString(), 'the newest ticks win');
+  const state = session.state();
+  assert.equal(state.droppedTicks, 3);
+  assert.match(state.message, /Потеряно тиков за время сбоя: 3/);
+  await session.disconnect();
+});
