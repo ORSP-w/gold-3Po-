@@ -31,7 +31,7 @@ async function compileMql({ compiler, source, binary, execute }) {
   const after = await stat(binary).catch(() => null);
   const errorCount = logText.match(/\b(\d+)\s+errors?\b/i);
   const hasExplicitSuccess = /\b0\s+errors?\b/i.test(logText);
-  const rebuilt = Boolean(after?.size && (!before || after.mtimeMs > before.mtimeMs || after.mtimeMs >= startedAt - 2500));
+  const rebuilt = Boolean(after?.size && (!before || after.mtimeMs > before.mtimeMs));
   if (Number(errorCount?.[1] ?? 0) > 0) {
     return { compiled: false, message: 'MetaEditor сообщил об ошибках компиляции ' + path.basename(source) + '.' };
   }
