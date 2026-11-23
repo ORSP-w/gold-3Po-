@@ -77,3 +77,6 @@ For the **recommended app-side connection**:
 For the **EA bridge path**, attach `Gold3PoBridge.mq5` and allow `http://127.0.0.1:8787` in MT5 WebRequest settings. Keep `DrawZones=true`. The EA's top-left `GOLD-3Po zones: N` status reports how many zone rectangles were created.
 
 Fresh installs now use distinct cyan buy-side and red sell-side zones with a light fill, matching the desktop chart. Existing saved MT5 colours/fill preferences are preserved; change them in **Settings → Отрисовка в MT5**, or reset settings to use the new defaults.
+
+
+The EA bridge includes the broker's `SYMBOL_TRADE_TICK_SIZE` in every history/live batch (falling back to `SYMBOL_POINT`, or sending an explicit `spec: null` when neither is usable). The server therefore builds Footprint rows and the session profile on the same broker grid for the EA path as for the app-side connector.
