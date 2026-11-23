@@ -32,6 +32,7 @@ let isClosingServer = false;
 let isQuitting = false;
 let quitReady = false;
 let mt5;
+let mt5ConnectTask = null;
 let marketIngestToken;
 let localApiPort = null;
 const adapterDir = app.isPackaged ? path.join(process.resourcesPath, 'adapters', 'mt5') : fileURLToPath(new URL('../adapters/mt5/', import.meta.url));
@@ -70,21 +71,26 @@ async function repairMt5Integration() {
 }
 
 async function connectAndRepairMt5() {
-  if (isQuitting) throw new Error('Приложение завершает работу.');
-  const response = await fetch(`${localOrigin}/v1/license/status`, { signal: AbortSignal.timeout(5000) });
-  const licence = response.ok ? await response.json() : null;
-  if (!licence?.valid) {
-    mt5.setIntegrationMessage('Сначала активируйте лицензию GOLD-3Po. Подключение к MT5 не выполнялось.');
+  if (mt5ConnectTask) return mt5ConnectTask;
+  mt5ConnectTask = (async () => {
+    if (isQuitting) throw new Error('Приложение завершает работу.');
+    const response = await fetch(`${localOrigin}/v1/license/status`, { signal: AbortSignal.timeout(5000) });
+    const licence = response.ok ? await response.json() : null;
+    if (!licence?.valid) {
+      mt5.setIntegrationMessage('Сначала активируйте лицензию GOLD-3Po. Подключение к MT5 не выполнялось.');
+      return mt5.state();
+    }
+    const connected = await mt5.connect();
+    if (connected.state !== 'online') return connected;
+    try {
+      await repairMt5Integration();
+    } catch (error) {
+      mt5.setIntegrationMessage('MT5 подключён, но автообновление MQL5-компонентов не завершено: ' + (error?.message || String(error)));
+    }
     return mt5.state();
-  }
-  const connected = await mt5.connect();
-  if (connected.state !== 'online') return connected;
-  try {
-    await repairMt5Integration();
-  } catch (error) {
-    mt5.setIntegrationMessage('MT5 подключён, но автообновление MQL5-компонентов не завершено: ' + (error?.message || String(error)));
-  }
-  return mt5.state();
+  })();
+  try { return await mt5ConnectTask; }
+  finally { mt5ConnectTask = null; }
 }
 
 function logError(error) {
