@@ -383,6 +383,18 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         return json(res, 202, { accepted:additions.length, duplicates, total:body.ticks.length, lastAcceptedSequence:lastSequence.get(key)||0 });
       } catch(error) { return json(res,error.status||422,{error:'invalid_live_batch',message:error.message}); }
     }
+    if (req.method === 'POST' && url.pathname === '/v1/ingest/mt5/spec/reset') {
+      if (!token) return json(res, 503, { error: 'ingest_not_configured' });
+      if (!tokenMatches(req.headers.authorization, token)) return json(res, 401, { error: 'unauthorized' });
+      try {
+        const body = await readJson(req);
+        if (body?.source !== 'mt5' || typeof body.symbol !== 'string' || !isGoldSymbol('mt5', body.symbol.trim().toUpperCase())) {
+          return json(res, 422, { error: 'invalid_symbol', message: 'Expected a supported gold symbol.' });
+        }
+        symbolSpecs.delete('mt5:' + body.symbol.trim().toUpperCase());
+        return json(res, 200, { reset: true, symbol: body.symbol.trim().toUpperCase() });
+      } catch (error) { return json(res, 400, { error: 'invalid_request', message: error.message }); }
+    }
     if (req.method === 'POST' && url.pathname === '/v1/ingest/mt5/history') {
       if (!token) return json(res, 503, { error: 'ingest_not_configured' });
       if (!tokenMatches(req.headers.authorization, token)) return json(res, 401, { error: 'unauthorized' });
@@ -422,7 +434,9 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (!token) return json(res, 503, { error: 'ingest_not_configured', message: 'Set MARKET_INGEST_TOKEN before accepting market events.' });
     if (!tokenMatches(req.headers.authorization, token)) return json(res, 401, { error: 'unauthorized' });
     try {
-      const event = normalize(await readJson(req));
+      const body = await readJson(req);
+      const event = normalize(body);
+      if (event.source === 'mt5') rememberSpec('mt5', event.symbol, body.spec);
       const eventId = event.eventId || eventFingerprint(event);
       const legacyId = eventFingerprint(event);
       if (seenEventIds.has(dedupeKey(event, eventId)) || seenEventIds.has(dedupeKey(event, legacyId))) return json(res, 409, { error: 'duplicate_event', eventId });
