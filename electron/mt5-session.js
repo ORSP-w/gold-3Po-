@@ -75,7 +75,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const route = historical ? 'history' : 'live-batch';
       const send = () => fetchApi(`/v1/ingest/mt5/${route}`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, ticks: records.slice(i, i + 1000) })
+        body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, ...(owner.spec ? { spec: owner.spec } : {}), ticks: records.slice(i, i + 1000) })
       });
       let response = await send();
       if (response.status === 409 && !historical) {
@@ -177,6 +177,9 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       if (result.symbol?.toUpperCase() !== owner.symbol || !result.commonDataPath || !result.dataPath) throw new Error('MT5 не подтвердил инструмент или папку данных.');
       owner.commonDataPath = result.commonDataPath;
       owner.dataPath = result.dataPath;
+      // The broker's tick size, when MT5 reported a usable one: the server builds footprint rows on it.
+      const tickSize = Number(result.spec?.tickSize);
+      if (Number.isFinite(tickSize) && tickSize > 0 && tickSize <= 100) owner.spec = { tickSize, ...(Number.isInteger(result.spec.digits) ? { digits: result.spec.digits } : {}) };
       status = { state: 'online', symbol: owner.symbol, message: 'Вход подтверждён. Загружаются котировки…', zoneCount: 0 };
       void seed(owner);
       return state();

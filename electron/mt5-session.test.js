@@ -122,6 +122,28 @@ test('session connects, ingests, publishes zones and clears them on disconnect',
   assert.ok(published.at(-1).count === 0, 'disconnect must clear the indicator snapshot');
 });
 
+test('the broker tick size from MT5 travels with every tick batch', async () => {
+  for (const [spec, expected] of [[{ tickSize: 0.01, digits: 2 }, { tickSize: 0.01, digits: 2 }], [undefined, undefined], [{ tickSize: 0 }, undefined]]) {
+    const api = fakeApi();
+    const session = createMt5Session({
+      workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't',
+      makeWorker: fakeWorker({
+        connect: { ok: true, symbol: 'XAUUSDm', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data', ...(spec ? { spec } : {}) },
+        history: { ok: true, ticks: [tick] },
+        poll: { ok: true, ticks: [tick] }
+      }),
+      request: api.request,
+      publish: async () => {}
+    });
+    await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '12345', password: 'secret', server: 'RoboForex-Demo', symbol: 'XAUUSDm' });
+    await new Promise(resolve => setTimeout(resolve, 300));
+    await session.disconnect();
+    const batches = api.calls.filter(call => call.path.startsWith('/v1/ingest/mt5/'));
+    assert.ok(batches.length >= 1, 'ticks must be sent');
+    for (const batch of batches) assert.deepEqual(batch.body.spec, expected, 'spec sent with ' + JSON.stringify(spec));
+  }
+});
+
 test('session recovers from a live sequence collision', async () => {
   const api = fakeApi({ failFirstLive: true });
   const session = createMt5Session({

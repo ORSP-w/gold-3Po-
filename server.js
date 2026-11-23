@@ -107,6 +107,21 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (analogueCache.size >= ANALOGUE_CACHE_MAX) analogueCache.delete(analogueCache.keys().next().value);
     analogueCache.set(key, entry);
   }
+  // Broker symbol specifications (tick size) reported by the MT5 connector with each tick batch.
+  const symbolSpecs = new Map();
+  function rememberSpec(source, symbol, spec) {
+    const tickSize = Number(spec?.tickSize);
+    if (typeof symbol !== 'string' || !Number.isFinite(tickSize) || tickSize <= 0 || tickSize > 100) return;
+    symbolSpecs.set(source + ':' + symbol.trim().toUpperCase(), { tickSize, ...(Number.isInteger(spec.digits) ? { digits: spec.digits } : {}) });
+  }
+  // The footprint's source precision: the broker's tick size when MT5 reported it, otherwise the
+  // caller's priceStep, otherwise 0.1. The user's row grouping is applied on top of this, never instead.
+  function priceStepFor(source, symbol, requested) {
+    const spec = symbolSpecs.get(source + ':' + symbol);
+    if (spec) return spec.tickSize;
+    const asked = Number(requested);
+    return Number.isFinite(asked) && asked > 0 ? Math.min(100, Math.max(0.001, asked)) : 0.1;
+  }
   function health() {
     const at = now();
     return { status: 'ok', ingestConfigured: Boolean(token), durableStorage: Boolean(dataFile), eventCount: events.length, memoryLimit: eventBufferCap, connectedStreams: clients.size, feeds: [...feeds.values()].map(feed => ({ ...feed, ageMs: Math.max(0, at - feed.receivedAt), status: at - feed.receivedAt <= staleAfterMs ? 'online' : 'stale' })) };
@@ -146,7 +161,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const intervalMs = rawInterval === null ? current.zones.timeframeMinutes * 60000 : Number(rawInterval);
       if (!Number.isInteger(intervalMs) || intervalMs < 60000 || intervalMs > 86400000) return json(res,400,{error:'invalid_interval',message:'intervalMs must be an integer between 60000 and 86400000.'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 10000, zoneOptions: current.zones, footprintOptions: current.footprint });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 10000, zoneOptions: current.zones, footprintOptions: current.footprint });
       const zones = analysis.zones.map(zone => ({
         id: zone.id, side: zone.side, low: zone.low, high: zone.high,
         strength: zone.strength, label: zone.label, distance: zone.distance, state: zone.state
@@ -197,11 +212,11 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (req.method === 'GET' && url.pathname === '/v1/market/analysis') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
-      const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.symbol === symbol && e.source === source);
+      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
       const activeAnalysis = await setups.activeDefinition();
       const current = await settings.get();
       return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep, zoneOptions: current.zones, footprintOptions: current.footprint }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
@@ -209,7 +224,6 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     if (req.method === 'GET' && url.pathname === '/v1/market/replay') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
-      const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
       const from = url.searchParams.get('from'), to = url.searchParams.get('to');
       const fromMs = from ? Date.parse(from) : -Infinity, toMs = to ? Date.parse(to) : Infinity;
       if ((from && !Number.isFinite(fromMs)) || (to && !Number.isFinite(toMs)) || fromMs > toMs) return json(res, 400, { error: 'invalid_replay_range' });
@@ -217,18 +231,19 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol && Date.parse(e.timestamp) >= fromMs && Date.parse(e.timestamp) <= toMs).sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
+      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
       const replaySettings = await settings.get();
       return json(res, 200, { symbol, source, from: from || null, to: to || null, eventCount: selected.length, replayLimit: 20000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, zoneOptions: replaySettings.zones, footprintOptions: replaySettings.footprint }) });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/backtest') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
       const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
-      const priceStep = Math.min(100, Math.max(0.001, Number(url.searchParams.get('priceStep') || 0.1)));
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
+      const priceStep = priceStepFor(source, symbol, url.searchParams.get('priceStep'));
       const backtestSettings = await settings.get();
       const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep, limit: 20000, zoneOptions: backtestSettings.zones, footprintOptions: backtestSettings.footprint });
       const options = {
@@ -257,7 +272,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const selected = events.filter(e => e.source === source && e.symbol === symbol);
       const active = await setups.activeDefinition();
       const signalSettings = await settings.get();
-      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, zoneOptions: signalSettings.zones, footprintOptions: signalSettings.footprint });
+      const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 20000, zoneOptions: signalSettings.zones, footprintOptions: signalSettings.footprint });
       const signals = generateSignals(analysis.bars, active.strategy);
       const simulation = runBacktest(analysis.bars, { ...active.backtest, minScore: active.strategy.minScore, atrPeriod: active.strategy.atrPeriod, strategyConditions: active.strategy });
       const calibrated = attachWalkForwardCalibration(signals, simulation.trades);
@@ -292,7 +307,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const cacheKey = source + ':' + symbol + ':' + intervalMs + ':' + settingsRevision;
       let cached = analogueCache.get(cacheKey);
       if (!cached || cached.watermark !== ingestWatermark) {
-        const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: 0.1, limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
+        const analysis = buildMarketAnalysis(selected, { intervalMs, priceStep: priceStepFor(source, symbol), limit: 20000, zoneOptions: analogueSettings.zones, footprintOptions: analogueSettings.footprint });
         const signals = generateSignals(analysis.bars, active.strategy);
         cached = { watermark: ingestWatermark, reference: signals.at(-1) || null, bars: analysis.bars };
         cachePut(cacheKey, cached);
@@ -321,6 +336,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
         const body = await readJson(req);
         if (body?.source !== 'mt5' || !Array.isArray(body.ticks) || body.ticks.length < 1 || body.ticks.length > 1000 || typeof body.symbol !== 'string') return json(res, 422, { error:'invalid_live_batch', message:'Expected 1..1000 MT5 ticks and a symbol.' });
         const key = 'mt5:' + body.symbol.trim().toUpperCase();
+        rememberSpec('mt5', body.symbol, body.spec);
         let sequenceCursor = lastSequence.get(key) || 0;
         let duplicates = 0;
         const additions = [];
@@ -355,6 +371,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       try {
         const body = await readJson(req);
         if (body?.source !== 'mt5' || !Array.isArray(body.ticks) || body.ticks.length < 1 || body.ticks.length > 1000) return json(res, 422, { error: 'invalid_history_batch', message: 'Expected 1..1000 MT5 ticks.' });
+        if (typeof body.symbol === 'string') rememberSpec('mt5', body.symbol, body.spec);
         let accepted = 0; let duplicates = 0; let rejected = 0;
         const additions = [];
         for (const raw of body.ticks) {

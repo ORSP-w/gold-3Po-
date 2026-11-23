@@ -172,6 +172,20 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual([item["error"] for item in lines],
                          ["invalid_json", "command_too_large", "not_connected", "unknown_operation"])
 
+    def test_symbol_spec_reports_the_broker_tick_size(self):
+        info = SimpleNamespace(trade_tick_size=0.01, point=0.01, digits=2)
+        self.assertEqual(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: info), "XAUUSDm"),
+                         {"tickSize": 0.01, "digits": 2})
+        # A zero tick size falls back to the point; nothing usable means no spec, never an invented one.
+        point_only = SimpleNamespace(trade_tick_size=0.0, point=0.05, digits=2)
+        self.assertEqual(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: point_only), "GOLD")["tickSize"], 0.05)
+        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: None), "GOLD"))
+        empty = SimpleNamespace(trade_tick_size=0.0, point=0.0, digits=2)
+        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=lambda s: empty), "GOLD"))
+        def broken(_):
+            raise RuntimeError(SECRET)
+        self.assertIsNone(connector.symbol_spec(SimpleNamespace(symbol_info=broken), "GOLD"))
+
     def test_unexpected_library_exception_does_not_disclose_its_text(self):
         self.connect()
         with patch.object(self.api, "copy_ticks_from", side_effect=RuntimeError(SECRET)):

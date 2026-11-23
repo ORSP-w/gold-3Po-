@@ -441,3 +441,23 @@ test('pattern analogues endpoint is licence-gated like every research route', as
     assert.equal((await fetch(url + '/v1/patterns/analogues')).status, 402);
   } finally { await new Promise(resolve => app.server.close(resolve)); }
 });
+
+test('footprint rows follow the broker tick size MT5 reports, not a fixed 0.1', async () => {
+  // Two prices 0.03 apart: on the old fixed 0.1 grid they collapse into one row; on the broker's
+  // 0.01 grid they stay two rows.
+  const ticks = [[1, 2648.11], [2, 2648.14]].map(([sequence, last]) => ({ timestamp: '2026-11-17T15:0' + sequence + ':00.000Z', sequence, bid: last - 0.05, ask: last + 0.05, last, tickVolume: 1, realVolume: 0, flags: 0 }));
+  const without = await fetch(base + '/v1/ingest/mt5/history', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', ticks }) });
+  assert.equal(without.status, 202);
+  let data = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(data.bars[0].levels.length, 1, 'without a broker spec the 0.1 default still applies');
+  const live = ticks.map((t, i) => ({ ...t, sequence: 100 + i, timestamp: '2026-11-17T15:0' + (5 + i) + ':00.000Z' }));
+  const withSpec = await fetch(base + '/v1/ingest/mt5/live-batch', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', spec: { tickSize: 0.01, digits: 2 }, ticks: live }) });
+  assert.equal(withSpec.status, 202);
+  data = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.deepEqual(data.bars[0].levels.map(row => row.price), [2648.14, 2648.11], 'rows sit on the broker 0.01 grid');
+  // A tick size that is not a positive number is ignored, never stored.
+  const bad = await fetch(base + '/v1/ingest/mt5/live-batch', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', spec: { tickSize: -1 }, ticks: [{ ...live[1], sequence: 200, timestamp: '2026-11-17T15:09:00.000Z' }] }) });
+  assert.equal(bad.status, 202);
+  data = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.deepEqual(data.bars[0].levels.map(row => row.price), [2648.14, 2648.11], 'an invalid spec does not replace the valid one');
+});

@@ -143,6 +143,30 @@ def account_number(value):
     return value
 
 
+def symbol_spec(api, symbol):
+    """The broker's own price grid for the symbol, or None when MT5 does not report a usable one.
+
+    The tick size is the smallest price change the broker quotes; it is the source precision the
+    footprint groups rows from, instead of assuming 0.1 for every broker.
+    """
+    try:
+        info = api.symbol_info(symbol)
+    except Exception:
+        return None
+    if info is None:
+        return None
+    tick = getattr(info, "trade_tick_size", None)
+    point = getattr(info, "point", None)
+    digits = getattr(info, "digits", None)
+    size = tick if isinstance(tick, (int, float)) and tick > 0 else point
+    if not isinstance(size, (int, float)) or not (0 < size <= 100) or size != size:
+        return None
+    spec = {"tickSize": float(size)}
+    if isinstance(digits, int) and 0 <= digits <= 10:
+        spec["digits"] = digits
+    return spec
+
+
 def milliseconds(row):
     try:
         return int(row["time_msc"]) or int(row["time"]) * 1000
@@ -251,7 +275,11 @@ class Worker:
             self.verify(login, server)
             self.session = (login, server, symbol, boundary)
             self.cursor = (boundary, 0)
-            return {"symbol": symbol, "commonDataPath": terminal.commondata_path, "dataPath": terminal.data_path}
+            result = {"symbol": symbol, "commonDataPath": terminal.commondata_path, "dataPath": terminal.data_path}
+            spec = symbol_spec(self.api, symbol)
+            if spec:
+                result["spec"] = spec
+            return result
         except Exception:
             self.close()
             raise
