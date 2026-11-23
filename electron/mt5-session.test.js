@@ -451,11 +451,43 @@ test('the resend queue is bounded and says how many ticks it had to drop', async
     publish: async () => {}
   });
   await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  const messages = [];
+  const watch = setInterval(() => messages.push(session.state().message), 3);
   await new Promise(resolve => setTimeout(resolve, 400));
+  clearInterval(watch);
   assert.equal(received.length, 3, 'only the newest ticks up to the bound are kept');
   assert.equal(received.at(-1), new Date(Date.UTC(2026, 0, 5, 10, 2, 2)).toISOString(), 'the newest ticks win');
   const state = session.state();
-  assert.equal(state.droppedTicks, 3);
-  assert.match(state.message, /Потеряно тиков за время сбоя: 3/);
+  assert.equal(state.droppedTicks, 3, 'the session keeps the total');
+  assert.ok(messages.some(message => /Потеряно тиков за время сбоя: 3/.test(message)), 'the recovery reports the loss');
+  assert.doesNotMatch(state.message, /Потеряно/, 'once recovered, the line no longer repeats an old loss');
+  await session.disconnect();
+});
+
+test('a 409 whose resend also fails keeps the batch for the next poll', async () => {
+  let collisions = 1, n = 0;
+  const received = [];
+  const base = fakeApi();
+  const request = async (url, init) => {
+    if (new URL(url).pathname === '/v1/ingest/mt5/live-batch') {
+      if (collisions > 0) { collisions--; return { ok: false, status: 409, json: async () => { throw new SyntaxError('bad body'); } }; }
+      for (const t of JSON.parse(init.body).ticks) received.push(t.timestamp);
+      return { ok: true, status: 202, json: async () => ({ accepted: 1 }) };
+    }
+    return base.request(url, init);
+  };
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 15, maxBackoffMs: 30,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { n++; return n === 1 ? { ok: true, ticks: [{ ...tick, timestamp: new Date(Date.UTC(2026, 0, 5, 10, 0, 1)).toISOString() }] } : { ok: true, ticks: [] }; }
+    }),
+    request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(received, [new Date(Date.UTC(2026, 0, 5, 10, 0, 1)).toISOString()], 'the tick from the failed 409 round is sent on the next poll');
   await session.disconnect();
 });

@@ -82,6 +82,7 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     }
     if (!historical && records.length > maxUnsent) {
       owner.droppedTicks = (owner.droppedTicks || 0) + records.length - maxUnsent;
+      owner.droppedThisOutage = (owner.droppedThisOutage || 0) + records.length - maxUnsent;
       records.splice(0, records.length - maxUnsent);
     }
     for (let i = 0; i < records.length && session === owner; i += 1000) {
@@ -90,21 +91,23 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
         body: JSON.stringify({ source: 'mt5', symbol: owner.symbol, spec: owner.spec ?? null, ticks: records.slice(i, i + 1000) })
       });
-      let response;
-      try { response = await send(); }
-      catch (error) { if (!historical) owner.unsent = records.slice(i); throw error; }
-      if (response.status === 409 && !historical) {
-        const { lastAcceptedSequence } = await response.json();
-        if (!Number.isSafeInteger(lastAcceptedSequence)) throw new Error('Не удалось синхронизировать поток котировок.');
-        owner.sequence = Math.max(owner.sequence, lastAcceptedSequence);
-        for (let j = i; j < records.length; j++) records[j].sequence = ++owner.sequence;
-        response = await send();
-      }
-      if (!response.ok) {
+      // Any failure from here on (network, a 409 that cannot be resequenced, a rejected resend, an
+      // unreadable answer) keeps this batch and the rest for the next poll instead of losing them.
+      try {
+        let response = await send();
+        if (response.status === 409 && !historical) {
+          const { lastAcceptedSequence } = await response.json();
+          if (!Number.isSafeInteger(lastAcceptedSequence)) throw new Error('Не удалось синхронизировать поток котировок.');
+          owner.sequence = Math.max(owner.sequence, lastAcceptedSequence);
+          for (let j = i; j < records.length; j++) records[j].sequence = ++owner.sequence;
+          response = await send();
+        }
+        if (!response.ok) throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
+        await response.json();
+      } catch (error) {
         if (!historical) owner.unsent = records.slice(i);
-        throw new Error(`Локальный сервис отклонил котировки (HTTP ${response.status}).`);
+        throw error;
       }
-      await response.json();
     }
     return records.length;
   }
@@ -156,7 +159,9 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       const stale = owner.lastTickAt !== undefined && now() - owner.lastTickAt > staleAfterMs;
       const online = stale ? `Нет новых тиков более ${Math.round(staleAfterMs / 1000)} с: рынок закрыт или терминал не получает котировки.`
         : !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
-      const lost = owner.droppedTicks ? ` Потеряно тиков за время сбоя: ${owner.droppedTicks}.` : '';
+      // The loss is reported once, for the outage that just ended; droppedTicks keeps the session total.
+      const lost = owner.droppedThisOutage ? ` Потеряно тиков за время сбоя: ${owner.droppedThisOutage}.` : '';
+      if (!owner.unsent?.length) owner.droppedThisOutage = 0;
       set(owner, { state: 'online', feed: stale ? 'stale' : 'live', retries: 0, droppedTicks: owner.droppedTicks || 0, lastTick: owner.lastTick ?? null, message: (owner.historyNote ? `${online} ${owner.historyNote}` : online) + lost });
     } catch (error) {
       if (session !== owner) return;
