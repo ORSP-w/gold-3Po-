@@ -22,27 +22,6 @@ function status(text, kind = '') { const el = $('settingsStatus'); if (!el) retu
 function setSeg(id, value) { $(id)?.querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.value === String(value))); }
 function setToggle(id, on) { const el = $(id); if (!el) return; el.classList.toggle('on', !!on); el.setAttribute('aria-pressed', String(!!on)); }
 
-// The EA bridge lives in the desktop app: the renderer only knows its port and token through IPC,
-// so in a browser the whole block stays hidden instead of showing an empty secret.
-async function renderBridge() {
-  const block = $('bridgeBlock'), note = $('bridgeUnavailable'), hint = $('bridgeOriginHint');
-  if (!block) return;
-  const api = window.goldMt5?.bridge;
-  if (!api) { block.hidden = true; if (note) note.hidden = false; return; }
-  try {
-    const info = await api();
-    const origin = `http://127.0.0.1:${info.port}`;
-    if ($('bridgeUrl')) $('bridgeUrl').textContent = origin;
-    if ($('bridgeToken')) $('bridgeToken').textContent = info.ingestToken || '—';
-    if (hint) hint.textContent = origin;
-    block.hidden = false;
-    if (note) note.hidden = true;
-  } catch (error) {
-    block.hidden = true;
-    if (note) { note.hidden = false; note.textContent = `Мост недоступен: ${error.message}`; }
-  }
-}
-
 function preview() {
   const svg = $('stylePreview'); if (!svg) return;
   const m = settings.mt5, w = m.lineStyle === 'solid' ? m.lineWidth : 1;
@@ -169,17 +148,11 @@ function bind() {
     if (response.ok) { settings = await response.json(); theme(settings.ui.theme); render(); publish(true); status('Настройки сброшены', 'ok'); }
     else status(`Не удалось сбросить (HTTP ${response.status})`, 'error');
   });
-  $('bridgeCopy')?.addEventListener('click', async () => {
-    const value = $('bridgeToken')?.textContent?.trim();
-    if (!value || value === '—') return status('Токен моста не получен', 'error');
-    try { await navigator.clipboard.writeText(value); status('Токен скопирован — вставьте его в IngestToken советника', 'ok'); }
-    catch { status('Скопируйте токен вручную: выделите его и нажмите Ctrl+C', 'error'); }
-  });
   const close = () => { if (saveTimer) { clearTimeout(saveTimer); save(); } dialog.close(); };
   $('settingsDone')?.addEventListener('click', close);
   $('settingsClose')?.addEventListener('click', close);
   dialog.addEventListener('click', e => { if (e.target === dialog) close(); });
-  const open = async () => { status(''); render(); dialog.showModal(); void renderBridge(); if (!(await load())) status('Настройки доступны после активации лицензии', 'error'); };
+  const open = async () => { status(''); render(); dialog.showModal(); if (!(await load())) status('Настройки доступны после активации лицензии', 'error'); };
   $('openSettings')?.addEventListener('click', open);
 
   // Navigation rail.
