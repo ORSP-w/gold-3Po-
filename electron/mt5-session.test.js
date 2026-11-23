@@ -342,7 +342,7 @@ test('a connector process that has exited ends the session at once, without retr
     makeWorker: () => ({
       stop() {}, stopped: () => stopped,
       async request(op) {
-        if (op === 'connect') return { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' };
+        if (op === 'connect') return { ok: true, symbol: 'XAUUSD', terminalPath: 'C:\\MT5\\terminal64.exe', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' };
         if (op === 'history') return { ok: true, ticks: [] };
         stopped = true;
         throw new Error('Модуль MT5 закрылся: crash');
