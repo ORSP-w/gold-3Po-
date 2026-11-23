@@ -165,14 +165,14 @@ test('zones and setups endpoints are licence-gated',async()=>{
   }finally{await new Promise(resolve=>app.server.close(resolve));}
 });
 
-test('settings API: red solid lines by default, partial updates, validation and reset',async()=>{
+test('settings API: distinct filled zones by default, partial updates, validation and reset',async()=>{
   let r=await fetch(base+'/v1/settings');assert.equal(r.status,200);
   let b=await r.json();
-  assert.equal(b.mt5.buyColor,'#FF0000');assert.equal(b.mt5.sellColor,'#FF0000');assert.equal(b.mt5.lineStyle,'solid');
+  assert.equal(b.mt5.buyColor,'#99FFE4');assert.equal(b.mt5.sellColor,'#FF8080');assert.equal(b.mt5.fill,true);assert.equal(b.mt5.lineStyle,'solid');
   assert.equal(b.zones.minZones,3);assert.equal(b.zones.maxZones,7);
   r=await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mt5:{lineWidth:3,sellColor:'#00ff00'},zones:{maxZones:5}})});
   b=await r.json();assert.equal(r.status,200);
-  assert.equal(b.mt5.lineWidth,3);assert.equal(b.mt5.sellColor,'#00FF00');assert.equal(b.mt5.buyColor,'#FF0000','untouched keys keep their value');assert.equal(b.zones.maxZones,5);
+  assert.equal(b.mt5.lineWidth,3);assert.equal(b.mt5.sellColor,'#00FF00');assert.equal(b.mt5.buyColor,'#99FFE4','untouched keys keep their value');assert.equal(b.zones.maxZones,5);
   r=await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({mt5:{lineStyle:'dash'}})});
   assert.equal((await r.json()).mt5.lineWidth,1,'MT5 draws dashed lines only at width 1');
   for(const bad of [{mt5:{buyColor:'red'}},{zones:{maxZones:50}},{mt5:{nope:1}},{other:{}},{zones:{timeframeMinutes:7}}]){
@@ -196,7 +196,7 @@ test('chart zones follow the settings and carry the MT5 drawing style',async()=>
     assert.ok(['buy','sell'].includes(zone.side));
     assert.ok(Number.isFinite(zone.low)&&Number.isFinite(zone.high)&&zone.high>zone.low);
   }
-  assert.equal(b.style.buyColor,'#FF0000');
+  assert.equal(b.style.buyColor,'#99FFE4');assert.equal(b.style.sellColor,'#FF8080');assert.equal(b.style.fill,true);
   await fetch(base+'/v1/settings',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({zones:{minZones:2,maxZones:3,timeframeMinutes:30},mt5:{fill:true}})});
   b=await (await fetch(base+'/v1/chart/zones?symbol=XAUUSD')).json();
   assert.equal(b.intervalMs,1800000,'timeframe setting drives the zone timeframe');
