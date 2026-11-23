@@ -85,6 +85,6 @@ test('EA bridge token is kept out of renderer IPC and handed to MT5 automaticall
   assert.match(integration,/bridge-token\.txt/,'the desktop main process writes the token to MT5 Common Files');
   assert.match(integration,/commonDataPath/);
   assert.match(bridge,/FILE_COMMON/,'the EA reads the bridge token from Common Files');
-  assert.match(settings,/токен передаёт через Common Files/i);
+  assert.match(html,/локальный токен передаёт через Common Files/i);
   assert.doesNotMatch(settings,/clipboard|bridgeCopy|bridgeToken/);
 });
