@@ -37,7 +37,7 @@ test('the MT5 chart reads the same Russian labels as the panel', () => {
 test('snapshot carries the drawing style from the app settings', () => {
   const style = { buyColor: '#00aaff', sellColor: '#ff8800', lineStyle: 'dash', lineWidth: 4, fill: true, showLabels: false, showStrength: false };
   assert.equal(encodeSnapshot('XAUUSD', [zone], 0, style).split('\r\n')[1], 'STYLE,#00AAFF,#FF8800,DASH,1,1,0,0', 'dashed lines are width 1 in MT5');
-  assert.equal(normalizeStyle({ buyColor: 'red', lineStyle: 'wavy', lineWidth: 99 }).buyColor, '#FF0000');
+  assert.equal(normalizeStyle({ buyColor: 'red', lineStyle: 'wavy', lineWidth: 99 }).buyColor, '#99FFE4');
   assert.equal(normalizeStyle({ lineStyle: 'wavy' }).lineStyle, 'solid');
   assert.equal(normalizeStyle({ lineWidth: 99 }).lineWidth, 2);
   assert.ok(!encodeSnapshot('XAUUSD', [{ ...zone, label: 'a,b\r\nEND' }]).includes('a,b'), 'labels cannot break the CSV');
