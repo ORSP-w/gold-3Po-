@@ -240,3 +240,95 @@ test('a connector that is not on disk says so, and names the path', async () => 
   assert.match(state.message, /переустановите приложение/, 'and not send the user looking for a MetaTrader5 package to install');
   assert.doesNotMatch(state.message, /Установите официальный пакет/, 'the old message blamed the user for our packaging');
 });
+
+test('a failed poll is retried with backoff instead of ending the session', async () => {
+  let failing = 2;
+  const api = fakeApi();
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 40, maxBackoffMs: 120, maxFailures: 5,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { if (failing > 0) { failing--; throw new Error('Терминал MT5 отключён от брокера.'); } return { ok: true, ticks: [tick] }; }
+    }),
+    request: api.request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const during = session.state();
+  assert.equal(during.state, 'reconnecting', 'a transient failure keeps the session and says it is retrying');
+  assert.match(during.message, /Повтор 1 из 4/);
+  await new Promise(resolve => setTimeout(resolve, 700));
+  const after = session.state();
+  assert.equal(after.state, 'online', 'the session recovers once polls succeed again');
+  assert.equal(after.retries, 0);
+  assert.ok(api.calls.some(c => c.path === '/v1/ingest/mt5/live-batch'), 'ticks flow again after recovery');
+  await session.disconnect();
+});
+
+test('repeated poll failures end the session with the last reason', async () => {
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 10, maxBackoffMs: 20, maxFailures: 3,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { throw new Error('Терминал MT5 закрыт.'); }
+    }),
+    request: fakeApi().request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const state = session.state();
+  assert.equal(state.state, 'offline');
+  assert.match(state.message, /Терминал MT5 закрыт/);
+});
+
+test('no new ticks for a while marks the feed stale without disconnecting', async () => {
+  let clock = 1_000_000;
+  let first = true;
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 20, staleAfterMs: 60_000, now: () => clock,
+    makeWorker: fakeWorker({
+      connect: { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' },
+      history: { ok: true, ticks: [] },
+      poll: () => { if (first) { first = false; return { ok: true, ticks: [tick] }; } return { ok: true, ticks: [] }; }
+    }),
+    request: fakeApi().request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.equal(session.state().feed, 'live');
+  clock += 61_000;
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const state = session.state();
+  assert.equal(state.state, 'online', 'a quiet market is not a disconnect');
+  assert.equal(state.feed, 'stale');
+  assert.match(state.message, /Нет новых тиков более 60 с/);
+  await session.disconnect();
+});
+
+test('a connector process that has exited ends the session at once, without retries', async () => {
+  let stopped = false;
+  const session = createMt5Session({
+    workerCommand: 'fake', workerArgs: [], apiOrigin: 'http://127.0.0.1:9', token: 't', pollMs: 10, maxFailures: 5,
+    makeWorker: () => ({
+      stop() {}, stopped: () => stopped,
+      async request(op) {
+        if (op === 'connect') return { ok: true, symbol: 'XAUUSD', commonDataPath: 'C:\\Common', dataPath: 'C:\\Data' };
+        if (op === 'history') return { ok: true, ticks: [] };
+        stopped = true;
+        throw new Error('Модуль MT5 закрылся: crash');
+      }
+    }),
+    request: fakeApi().request,
+    publish: async () => {}
+  });
+  await session.connect({ terminalPath: 'C:\\MT5\\terminal64.exe', login: '1', password: 'p', server: 'S', symbol: 'XAUUSD' });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  const state = session.state();
+  assert.equal(state.state, 'offline', 'a dead connector cannot answer a retry');
+  assert.match(state.message, /Модуль MT5 закрылся/);
+});

@@ -41,6 +41,7 @@ function startWorker(command, args) {
   });
   return {
     stop,
+    stopped: () => stopped,
     request(op, values = {}, timeout = 25_000) {
       if (stopped || current) return Promise.reject(new Error('Модуль MT5 недоступен или занят.'));
       return new Promise((resolve, reject) => {
@@ -52,7 +53,8 @@ function startWorker(command, args) {
   };
 }
 
-export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, makeWorker = startWorker, request = fetch, publish = publishSnapshot }) {
+export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, makeWorker = startWorker, request = fetch, publish = publishSnapshot,
+  now = () => Date.now(), pollMs = 1800, maxFailures = 5, maxBackoffMs = 30_000, staleAfterMs = 120_000 }) {
   let session = null;
   let status = { state: 'offline', message: 'MT5 не подключён.' };
   const fetchApi = (route, init = {}) => request(apiOrigin + route, { ...init, signal: AbortSignal.timeout(15_000) });
@@ -103,8 +105,10 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       owner.cachedStyle = body.style;
     } else if (!changed) {
       const response = await fetchApi('/v1/license/status');
+      // An answered "not valid" ends the session at once; only an unreachable service is retried.
+      const body = await response.json().catch(() => null);
+      if (response.status === 402 || body?.valid === false) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
       if (!response.ok) throw new Error('Не удалось проверить лицензию.');
-      if (!(await response.json()).valid) { await disconnect('Лицензия GOLD-3Po недействительна.'); return; }
     } else {
       return;
     }
@@ -116,7 +120,11 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
     set(owner, { zoneCount: owner.cachedZones.length });
   }
 
+  // A failed poll (terminal briefly gone, the local service restarting, HTTP 5xx) is retried with a
+  // growing pause instead of ending the session; after `maxFailures` in a row the session gives up.
+  // No new tick for `staleAfterMs` marks the feed stale in the status, without disconnecting.
   async function poll(owner) {
+    let delay = pollMs;
     try {
       const result = await owner.worker.request('poll');
       if (session !== owner) return;
@@ -124,14 +132,22 @@ export function createMt5Session({ workerCommand, workerArgs, apiOrigin, token, 
       if (count) {
         owner.dirty = true;
         owner.lastTick = result.ticks.at(-1).timestamp;
+        owner.lastTickAt = now();
       }
       await refreshLevels(owner, owner.dirty);
-      const online = !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
-      set(owner, { state: 'online', lastTick: owner.lastTick ?? null, message: owner.historyNote ? `${online} ${owner.historyNote}` : online });
+      owner.failures = 0;
+      const stale = owner.lastTickAt !== undefined && now() - owner.lastTickAt > staleAfterMs;
+      const online = stale ? `Нет новых тиков более ${Math.round(staleAfterMs / 1000)} с: рынок закрыт или терминал не получает котировки.`
+        : !owner.lastTick ? 'Вход подтверждён. Ожидаем котировки.' : 'Вход подтверждён. Уровни обновляются по таймфрейму из настроек.';
+      set(owner, { state: 'online', feed: stale ? 'stale' : 'live', retries: 0, lastTick: owner.lastTick ?? null, message: owner.historyNote ? `${online} ${owner.historyNote}` : online });
     } catch (error) {
-      if (session === owner) await disconnect(error.message);
+      if (session !== owner) return;
+      owner.failures = (owner.failures || 0) + 1;
+      if (owner.failures >= maxFailures || owner.worker.stopped?.()) { await disconnect(error.message); return; }
+      delay = Math.min(pollMs * 2 ** owner.failures, maxBackoffMs);
+      set(owner, { state: 'reconnecting', retries: owner.failures, message: `Связь прервалась (${error.message}). Повтор ${owner.failures} из ${maxFailures - 1} через ${Math.round(delay / 1000)} с.` });
     } finally {
-      if (session === owner) owner.timer = setTimeout(() => void poll(owner), 1800);
+      if (session === owner) owner.timer = setTimeout(() => void poll(owner), delay);
     }
   }
 

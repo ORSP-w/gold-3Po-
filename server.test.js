@@ -481,3 +481,14 @@ test('only gold symbols can store a broker spec, and the store is bounded', asyn
   assert.deepEqual(await rowsFor('XAUUSD.39'), [2648.11], 'the newest variant keeps its 0.01 grid');
   assert.deepEqual(await rowsFor('XAUUSD.0'), [2648.1], 'the oldest variant was evicted and falls back to 0.1');
 });
+
+test('a tick on the single-tick route uses the same broker grid as the batches for that symbol', async () => {
+  const at = minute => '2026-11-17T15:0' + minute + ':00.000Z';
+  let r = await fetch(base + '/v1/ingest/mt5/live-batch', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', spec: { tickSize: 0.01 }, ticks: [{ timestamp: at(1), sequence: 1, bid: 2700.40, ask: 2700.42, last: 2700.41, tickVolume: 1, realVolume: 0, flags: 0 }] }) });
+  assert.equal(r.status, 202);
+  r = await fetch(base + '/v1/ingest/mt5/tick', { method: 'POST', headers: auth, body: JSON.stringify({ source: 'mt5', symbol: 'XAUUSD', timestamp: at(2), sequence: 2, bid: 2700.42, ask: 2700.44, last: 2700.43, tickVolume: 1, realVolume: 0 }) });
+  assert.equal(r.status, 202);
+  const data = await (await fetch(base + '/v1/market/analysis?symbol=XAUUSD&intervalMs=900000')).json();
+  assert.equal(data.footprintStep, 0.01, 'the analysis reports the step the browser then uses');
+  assert.deepEqual(data.bars[0].levels.map(row => row.price), [2700.43, 2700.41], 'the single tick keeps its own 0.01 row');
+});

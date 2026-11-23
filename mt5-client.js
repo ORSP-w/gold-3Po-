@@ -19,11 +19,12 @@ function render(status) {
   const tick = status.lastTick ? new Date(status.lastTick).toLocaleString() : '';
   const note = connected ? `${status.message} Уровней: ${status.zoneCount ?? 0}.${tick ? ` Последний тик: ${tick}.` : ''}${tickSizeNote(status)}` : status.message;
   detail.textContent = indicatorNotice ? `${indicatorNotice} ${note}` : note;
-  const label = connected ? `MT5 · ${status.symbol}` : status.state === 'connecting' ? 'MT5 · подключение…' : 'Подключить MT5';
+  const pending = status.state === 'connecting' || status.state === 'reconnecting';
+  const label = connected ? `MT5 · ${status.symbol}${status.feed === 'stale' ? ' · нет тиков' : ''}` : status.state === 'reconnecting' ? 'MT5 · переподключение…' : status.state === 'connecting' ? 'MT5 · подключение…' : 'Подключить MT5';
   $('mt5Open').textContent = label;
   $('mt5Open').dataset.state = status.state;
-  $('mt5Connect').disabled = !bridge || busy || connected || status.state === 'connecting';
-  $('mt5Disconnect').disabled = !bridge || busy || (!connected && status.state !== 'connecting');
+  $('mt5Connect').disabled = !bridge || busy || connected || pending;
+  $('mt5Disconnect').disabled = !bridge || busy || (!connected && !pending);
   $('mt5InstallIndicator').disabled = !bridge || busy || !connected;
   if (form) form.querySelectorAll('input').forEach(input => { input.disabled = !bridge || busy || connected; });
   $('mt5Browse').disabled = !bridge || busy || connected;
