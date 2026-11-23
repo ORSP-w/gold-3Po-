@@ -412,13 +412,15 @@ try {
   await page.locator('#settingsClose').click();
   await page.waitForTimeout(150);
   // Плотная история: на 4K панель должна вмещать серию, а не растягивать её в ленту.
-  // Two trades per 15-minute bar create real OHLC bodies in both directions; a single tick
-  // per bar makes open === close and cannot exercise the down-candle footprint renderer.
-  const denseTicks = Array.from({ length: 1200 }, (_, n) => {
-    const i = Math.floor(n / 2), closeTick = n % 2 === 1;
-    const at = new Date(Date.now() - (600 - i) * 15 * 60000 + (closeTick ? 30000 : 0));
+  // Three trades per 15-minute bar create OHLC bodies in both directions plus a traded
+  // extreme outside each body, so both candle edges and wick rows are exercised.
+  const denseTicks = Array.from({ length: 1800 }, (_, n) => {
+    const i = Math.floor(n / 3), tickInBar = n % 3;
+    const at = new Date(Date.now() - (600 - i) * 15 * 60000 + tickInBar * 15000);
     const basePrice = 2650 + Math.sin(i / 9) * 4 + i * 0.02;
-    const px = basePrice + (closeTick ? (i % 2 ? -0.3 : 0.3) : 0);
+    const close = basePrice + (i % 2 ? -0.3 : 0.3);
+    const extreme = basePrice + (i % 2 ? -0.5 : 0.5);
+    const px = tickInBar === 0 ? basePrice : tickInBar === 1 ? extreme : close;
     return { timestamp: at.toISOString(), sequence: 100000 + n, bid: +(px - 0.1).toFixed(2), ask: +(px + 0.1).toFixed(2), last: +px.toFixed(2), tickVolume: 1, realVolume: 0, flags: 0 };
   });
   // History ingestion is intentionally capped at 1,000 ticks per request; send the 1,200-tick
