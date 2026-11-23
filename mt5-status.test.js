@@ -20,4 +20,9 @@ test('the MT5 panel renders the tick size note and the module is served and pack
   assert.match(server, /'\/mt5-status\.js': \['mt5-status\.js'/, 'the browser can load the module');
   const pkg = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
   assert.ok(pkg.build.files.includes('mt5-status.js'), 'the desktop build ships the module');
+  // The packaged-app smoke test fetches every module the panel loads, this one included.
+  const main = await readFile(new URL('./electron/main.js', import.meta.url), 'utf8');
+  const smokeAssets = main.match(/for \(const asset of \[([^\]]*)\]\)/);
+  assert.ok(smokeAssets, 'the packaged-app smoke test asset list must exist');
+  assert.match(smokeAssets[1], /'\/mt5-status\.js'/, 'the smoke test must fetch /mt5-status.js');
 });
