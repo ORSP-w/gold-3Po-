@@ -1,6 +1,7 @@
 import { barDelta, totalVolume } from './market-data.js';
 import { footprintOf, footprintCell, sessionProfile, applyTickToBar, emptyBar, tickVolume as footprintTickVolume, DEFAULT_FOOTPRINT_OPTIONS } from './footprint-engine.js';
 import { zoneLabelRu, zoneStateRu } from './zone-labels.js';
+import { candlePart } from './footprint-candle.js';
 import { chartScale } from './chart-scale.js';
 const $ = s => document.querySelector(s);
 const chart=$('#priceChart'), grid=$('#footprintGrid'), zoneList=$('#zoneList'), toast=$('#toast'), chartEmpty=$('#chartEmpty');
@@ -163,7 +164,8 @@ function renderFootprint(){
   const levelRows=Array.isArray(b.levels)?b.levels:[];
   const unfinished=(levelRows.length&&near(levelRows[0].price,p)&&b.unfinishedHigh)||(levelRows.length&&near(levelRows.at(-1).price,p)&&b.unfinishedLow);
   let content='',cls='';
-  if(mode==='bidask'){content=showNumbers&&total?`<span>${v.unknown&&!v.bid&&!v.ask?'·':v.bid}</span><span>${v.unknown&&!v.bid&&!v.ask?'·':v.ask}</span>`:'';cls='bidask';}
+  // A row with only unclassified ticks has no bid/ask split to show, so it stays blank rather than "· ·".
+  if(mode==='bidask'){content=showNumbers&&(v.bid||v.ask)?`<span>${v.bid}</span><span>${v.ask}</span>`:'';cls='bidask';}
   if(mode==='volume'){content=showNumbers&&total?fmt(total,0):'';cls='volume-cell';}
   // The value modes share one definition with the engine, so a row without a known side reads the same in all of them.
   if(mode==='delta'||mode==='deltaPct'||mode==='buy'||mode==='sell'){const cell=footprintCell(v,mode);content=showNumbers?cell.text:'';cls=cell.tone==='positive'?'delta-positive':cell.tone==='negative'?'delta-negative':'volume-cell';}
@@ -173,6 +175,10 @@ function renderFootprint(){
   if(absorbed)cls+=' foot-absorbed';
   if(unfinished)cls+=' foot-unfinished';
   if(offset+i===bars.length-1)cls+=' foot-forming';
+  // Each column reads as its candle: rows between open and close are the body (coloured by the bar's
+  // direction), traded rows outside it are the wick, and rows the bar never reached stay blank.
+  const part=candlePart(b,p,footprintStep());
+  cls+=' candle-'+part+(part==='body'?(b.c>=b.o?' candle-up':' candle-down'):'');
   const marks=[isPoc?'POC':'',inVa?'зона стоимости':'',imbalance?(imbalance==='buy'?'имбаланс покупателей':'имбаланс продавцов'):'',absorbed?'поглощение':'',unfinished?'незакрытый аукцион':''].filter(Boolean).join(' · ');
   return `<button class="foot-cell ${cls} ${offset+i===selected?'active':''}" data-index="${offset+i}" style="--intensity:${intensity.toFixed(3)}" title="Бид ${v.bid}; аск ${v.ask}; без стороны ${v.unknown}${marks?' · '+marks:''}" aria-label="Свеча ${offset+i+1}, цена ${fmt(p)}, бид ${v.bid}, аск ${v.ask}, без стороны ${v.unknown}${marks?', '+marks:''}">${content}${isPoc?'<i class="poc-mark">◆</i>':''}</button>`;}).join('')}${(()=>{
   const row=profileRows.get(Number(p).toFixed(2));
