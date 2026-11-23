@@ -54,9 +54,6 @@ function registerMt5Ipc() {
   handle('connect', () => connectAndRepairMt5());
   handle('disconnect', () => mt5.disconnect());
   handle('install-integration', () => repairMt5Integration());
-  // The EA bridge (Gold3PoBridge.mq5) authenticates with the same token the local API expects,
-  // so the window shows it instead of sending the user into settings.json.
-  handle('bridge', () => ({ port: localApiPort, ingestToken: marketIngestToken }));
 }
 
 async function repairMt5Integration() {
