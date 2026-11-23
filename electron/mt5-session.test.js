@@ -394,7 +394,7 @@ test('the last retry says the next failure closes the connection', async () => {
   await new Promise(resolve => setTimeout(resolve, 300));
   const state = session.state();
   assert.equal(state.state, 'reconnecting');
-  assert.match(state.message, /Повтор 4 из 4.*последний: при новой ошибке соединение будет закрыто/);
+  assert.match(state.message, /Повтор 4 из 5.*последний: при новой ошибке соединение будет закрыто/);
   await session.disconnect();
 });
 
