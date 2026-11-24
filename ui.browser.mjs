@@ -181,9 +181,24 @@ try {
   assert.equal(await page.locator('.zone-row.selected').count(), 0, 'reset should clear zone selection');
 
   await page.locator('#layoutButton').click();
-  assert.ok(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart')));
+  assert.ok(await page.locator('#workspace').evaluate(el => el.classList.contains('trading-layout')), 'split TradingView layout must activate');
+  assert.ok(await page.locator('#chartPanelResizer').isVisible(), 'split layout must expose the chart/footprint divider');
+  for (const id of ['#footZoomXOut', '#footZoomXIn', '#footZoomYOut', '#footZoomYIn']) {
+    assert.ok(await page.locator(id).isVisible(), 'footprint zoom control must be visible: ' + id);
+  }
+  const footprintCell = page.locator('#footprintGrid .foot-cell').first();
+  const widthBefore = await footprintCell.evaluate(el => el.getBoundingClientRect().width);
+  const heightBefore = await footprintCell.evaluate(el => el.getBoundingClientRect().height);
+  await page.locator('#footZoomXIn').click();
+  const widthAfter = await footprintCell.evaluate(el => el.getBoundingClientRect().width);
+  assert.ok(widthAfter > widthBefore, 'X+ must widen footprint columns');
+  await page.locator('#footZoomYIn').click();
+  const heightAfter = await footprintCell.evaluate(el => el.getBoundingClientRect().height);
+  assert.ok(heightAfter > heightBefore, 'Y+ must increase footprint price-row height');
+  await page.locator('#footZoomXReset').click();
+  await page.locator('#footZoomYReset').click();
   await page.locator('#layoutButton').click();
-  assert.ok(!(await page.locator('#workspace').evaluate(el => el.classList.contains('focus-chart'))));
+  assert.ok(!(await page.locator('#workspace').evaluate(el => el.classList.contains('trading-layout'))), 'layout toggle restores stacked workspace');
 
   await page.locator('#loadReplay').click();
   await page.waitForFunction(() => document.querySelector('#replaySlider') && !document.querySelector('#replaySlider').disabled, null, { timeout:5000 });

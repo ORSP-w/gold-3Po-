@@ -37,6 +37,19 @@ test('timeframe aggregation separates bars and orders ticks chronologically',()=
   assert.equal(out.bars[0].o,2649);
   assert.equal(out.bars[1].c,2651);
 });
+test('analysis metadata and aggregation use the selected timeframe', () => {
+  const ticks = [
+    tick('2026-11-17T10:01:00.000Z', 2649),
+    tick('2026-11-17T10:10:00.000Z', 2651)
+  ];
+  const five = buildMarketAnalysis(ticks, { intervalMs: 5 * 60_000 });
+  const fifteen = buildMarketAnalysis(ticks, { intervalMs: 15 * 60_000 });
+  assert.equal(five.intervalMs, 5 * 60_000);
+  assert.equal(five.timeframeMinutes, 5);
+  assert.equal(five.bars.length, 2);
+  assert.equal(fifteen.timeframeMinutes, 15);
+  assert.equal(fifteen.bars.length, 1);
+});
 test('analysis validates its inputs',()=>{
  assert.throws(()=>buildMarketAnalysis([], {priceStep:0}),/Invalid analysis input/);
  assert.throws(()=>buildMarketAnalysis([], {footprintStep:0}),/Invalid analysis input/);
