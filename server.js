@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { readFile, appendFile, mkdir } from 'node:fs/promises';
+import { readFile, appendFile, mkdir, open } from 'node:fs/promises';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { runBacktest } from './backtest-engine.js';
 import { generateSignals, attachWalkForwardCalibration } from './strategy-engine.js';
@@ -18,6 +18,35 @@ const STATIC_FILES = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.
 const json = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(JSON.stringify(body)); };
 const positive = n => Number.isFinite(n) && n > 0;
 const validTimestamp = value => typeof value === 'string' && Number.isFinite(Date.parse(value));
+
+// Read only the latest retained JSONL records. Never materialize a growing archive as one JS string.
+async function readRecentLines(file, maxLines, chunkSize = 1024 * 1024) {
+  const handle = await open(file, 'r');
+  try {
+    let offset = (await handle.stat()).size;
+    let carry = Buffer.alloc(0);
+    const newestFirst = [];
+    while (offset > 0 && newestFirst.length < maxLines) {
+      const start = Math.max(0, offset - chunkSize);
+      const chunk = Buffer.alloc(offset - start);
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, start);
+      if (!bytesRead) break;
+      const combined = Buffer.concat([chunk.subarray(0, bytesRead), carry]);
+      let lineEnd = combined.length;
+      for (let index = combined.length - 1; index >= 0 && newestFirst.length < maxLines; index -= 1) {
+        if (combined[index] !== 10) continue;
+        if (lineEnd > index + 1) newestFirst.push(combined.subarray(index + 1, lineEnd));
+        lineEnd = index;
+      }
+      carry = combined.subarray(0, lineEnd);
+      offset = start;
+    }
+    if (offset === 0 && carry.length && newestFirst.length < maxLines) newestFirst.push(carry);
+    return newestFirst.reverse();
+  } finally {
+    await handle.close();
+  }
+}
 // GOLD-3Po is a gold-only workspace: broker XAUUSD (incl. suffix variants like XAUUSD./XAUUSD-ECN)
 // and COMEX GC futures (GC, GCZ6, …). Everything else is rejected at the ingest boundary.
 const isGoldSymbol = (source, symbol) => source === 'comex'
@@ -70,8 +99,9 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
   const dedupeKey = (event, id) => `${event.source}:${event.symbol}:${id}`;
   const storageReady = dataFile ? (async () => {
     try {
-      const raw = await readFile(dataFile, 'utf8');
-      for (const line of raw.split('\n')) {
+      const recentLines = await readRecentLines(dataFile, eventBufferCap);
+      for (const rawLine of recentLines) {
+        const line = rawLine.toString('utf8');
         if (!line.trim()) continue;
         try {
           const event = JSON.parse(line);
@@ -226,7 +256,7 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/analysis') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
-      const intervalMs = Math.min(86400000, Math.max(60000, Number(url.searchParams.get('intervalMs') || 900000)));
+      
       const source = (url.searchParams.get('source') || 'mt5').toLowerCase();
       if (!['mt5','comex'].includes(source)) return json(res,400,{error:'unsupported_market_source'});
       if (!isGoldSymbol(source, symbol)) return json(res,400,{error:'symbol_not_gold',message:'GOLD-3Po is gold-only: XAUUSD (MT5) or GC futures (COMEX).'});
@@ -235,7 +265,8 @@ export function createMarketServer({ token = process.env.MARKET_INGEST_TOKEN, no
       const footprintStep = footprintStepFor(source, symbol, priceStep);
       const activeAnalysis = await setups.activeDefinition();
       const current = await settings.get();
-      return json(res, 200, { symbol, source, ...buildMarketAnalysis(selected, { intervalMs, priceStep, footprintStep, zoneOptions: current.zones, footprintOptions: current.footprint }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
+      const intervalMs = Math.min(86400000, Math.max(60000, Number(current.zones.timeframeMinutes || 15) * 60000));
+      return json(res, 200, { symbol, source, intervalMs, timeframeMinutes: intervalMs / 60000, ...buildMarketAnalysis(selected, { intervalMs, priceStep, footprintStep, zoneOptions: current.zones, footprintOptions: current.footprint }), feed: health().feeds.find(f => f.source === source && f.symbol === symbol) || null });
     }
     if (req.method === 'GET' && url.pathname === '/v1/market/replay') {
       const symbol = (url.searchParams.get('symbol') || 'XAUUSD').toUpperCase();
